@@ -275,6 +275,7 @@ private:
     Message *GetIndirectTransmission(Child &aChild);
     otError PrepareDiscoverRequest(void);
     void PrepareIndirectTransmission(Message &aMessage, const Child &aChild);
+    otError PrepareDataPoll(void);
     void HandleMesh(uint8_t *aFrame, uint8_t aPayloadLength, const Mac::Address &aMacSource,
                     const otThreadLinkInfo &aLinkInfo);
     void HandleFragment(uint8_t *aFrame, uint8_t aPayloadLength,
@@ -315,8 +316,6 @@ private:
     otError GetDestinationRlocByServiceAloc(uint16_t aServiceAloc, uint16_t &aMeshDest);
 #endif // OPENTHREAD_ENABLE_SERVICE
 #endif // OPENTHREAD_FTD
-
-    static MeshForwarder &GetOwner(const Context &aContext);
 
     void LogIp6Message(MessageAction aAction, const Message &aMessage, const Mac::Address *aMacAddress,
                        otError aError);

@@ -40,6 +40,7 @@
 
 #include <mbedtls/ssl.h>
 #include <mbedtls/entropy.h>
+#include <mbedtls/entropy_poll.h>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/error.h>
 #include <mbedtls/certs.h>
@@ -72,7 +73,7 @@ public:
      * @param[in]  aNetif  A reference to the Thread network interface.
      *
      */
-    Dtls(Instance &aInstance);
+    explicit Dtls(Instance &aInstance);
 
     /**
      * This function pointer is called when a connection is established or torn down.
@@ -231,10 +232,10 @@ private:
     static void HandleTimer(Timer &aTimer);
     void HandleTimer(void);
 
+    static int HandleMbedtlsEntropyPoll(void *aData, unsigned char *aOutput, size_t aInLen, size_t *aOutLen);
+
     void Close(void);
     void Process(void);
-
-    static Dtls &GetOwner(const Context &aContext);
 
     uint8_t mPsk[kPskMaxLength];
     uint8_t mPskLength;

@@ -438,12 +438,8 @@ public:
     /**
      * This method restores children information from non-volatile memory.
      *
-     * @retval  OT_ERROR_NONE     Successfully restored children information.
-     * @retval  OT_ERROR_FAILED   The saved child info in non-volatile memory is invalid.
-     * @retval  OT_ERROR_NO_BUFS  More children in settings than max children.
-     *
      */
-    otError RestoreChildren(void);
+    void RestoreChildren(void);
 
     /**
      * This method remove a stored child information from non-volatile memory.
@@ -466,16 +462,6 @@ public:
      *
      */
     otError StoreChild(uint16_t aChildRloc16);
-
-    /**
-     * This method refreshes all the saved children information in non-volatile memory by first erasing any saved
-     * child information in non-volatile memory and then saving all children info.
-     *
-     * @retval  OT_ERROR_NONE      Successfully refreshed all children info in non-volatile memory
-     * @retval  OT_ERROR_NO_BUFS   Insufficient available buffers to store child.
-     *
-     */
-    otError RefreshStoredChildren(void);
 
     /**
      * This method returns a pointer to a Neighbor object.
@@ -518,6 +504,17 @@ public:
     Neighbor *GetNeighbor(const Ip6::Address &aAddress);
 
     /**
+     * This method returns a pointer to a Neighbor object if a one-way link is maintained
+     * as in the instance of an FFD child with neighbor routers.
+     *
+     * @param[in]  aAddress  The address of the Neighbor.
+     *
+     * @returns A pointer to the Neighbor corresponding to @p aAddress, NULL otherwise.
+     *
+     */
+    Neighbor *GetRxOnlyNeighborRouter(const Mac::Address &aAddress);
+
+    /**
      * This method retains diagnostic information for an attached child by Child ID or RLOC16.
      *
      * @param[in]   aChildId    The Child ID or RLOC16 for an attached child.
@@ -534,6 +531,17 @@ public:
      *
      */
     otError GetChildInfoByIndex(uint8_t aChildIndex, otChildInfo &aChildInfo);
+
+    /**
+     * This method indicates whether or not the RLOC16 is an MTD child of this device.
+     *
+     * @param[in]  aRloc16  The RLOC16.
+     *
+     * @retval TRUE if @p aRloc16 is an MTD child of this device.
+     * @retval FALSE if @p aRloc16 is not an MTD child of this device.
+     *
+     */
+    bool IsMinimalChild(uint16_t aRloc16);
 
     /**
      * This method gets the next neighbor information. It is used to iterate through the entries of
@@ -677,7 +685,7 @@ public:
      * @retval OT_ERROR_NONE  Steering data was set
      *
      */
-    otError SetSteeringData(const otExtAddress *aExtAddress);
+    otError SetSteeringData(const Mac::ExtAddress *aExtAddress);
 #endif // OPENTHREAD_CONFIG_ENABLE_STEERING_DATA_SET_OOB
 
     /**
@@ -744,6 +752,7 @@ private:
     otError AppendActiveDataset(Message &aMessage);
     otError AppendPendingDataset(Message &aMessage);
     otError GetChildInfo(Child &aChild, otChildInfo &aChildInfo);
+    otError RefreshStoredChildren(void);
     otError HandleDetachStart(void);
     otError HandleChildStart(AttachMode aMode);
     otError HandleLinkRequest(const Message &aMessage, const Ip6::MessageInfo &aMessageInfo);
@@ -827,8 +836,6 @@ private:
 
     void SignalChildUpdated(otThreadChildTableEvent aEvent, Child &aChild);
 
-    static MleRouter &GetOwner(const Context &aContext);
-
     TrickleTimer mAdvertiseTimer;
     TimerMilli mStateUpdateTimer;
 
@@ -852,7 +859,6 @@ private:
     uint8_t mLeaderWeight;
     uint32_t mFixedLeaderPartitionId;  ///< only for certification testing
     bool mRouterRoleEnabled : 1;
-    bool mIsRouterRestoringChildren : 1;
     bool mAddressSolicitPending : 1;
 
     uint8_t mRouterId;

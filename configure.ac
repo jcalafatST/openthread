@@ -765,6 +765,38 @@ AM_CONDITIONAL([OPENTHREAD_ENABLE_JAM_DETECTION], [test "${enable_jam_detection}
 AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_JAM_DETECTION],[${OPENTHREAD_ENABLE_JAM_DETECTION}],[Define to 1 if you want to use jam detection feature])
 
 #
+# Channel Monitor
+#
+
+AC_ARG_ENABLE(channel_monitor,
+    [AS_HELP_STRING([--enable-channel-monitor],[Enable Channel Monitor support @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_channel_monitor=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_channel_monitor} for --enable-channel-monitor])
+            ;;
+        esac
+    ],
+    [enable_channel_monitor=no])
+
+if test "$enable_channel_monitor" = "yes"; then
+    OPENTHREAD_ENABLE_CHANNEL_MONITOR=1
+else
+    OPENTHREAD_ENABLE_CHANNEL_MONITOR=0
+fi
+
+AC_MSG_CHECKING([whether to enable channel monitor])
+AC_MSG_RESULT(${enable_channel_monitor})
+AC_SUBST(OPENTHREAD_ENABLE_CHANNEL_MONITOR)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_CHANNEL_MONITOR], [test "${enable_channel_monitor}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_CHANNEL_MONITOR],[${OPENTHREAD_ENABLE_CHANNEL_MONITOR}],[Define to 1 if you want to use channel monitor feature])
+
+#
 # MAC Filter (include AddressFilter and RssInFilter)
 #
 
@@ -861,36 +893,33 @@ AM_CONDITIONAL([OPENTHREAD_ENABLE_LEGACY], [test "${enable_legacy}" = "yes"])
 AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_LEGACY],[${OPENTHREAD_ENABLE_LEGACY}],[Define to 1 if you want to use legacy network support])
 
 #
-# Vendor Specific Spinel Command Handler
+# NCP Vendor Hook Source - Specify a C++ file that implements the NCP vendor hook.
 #
 
-AC_ARG_ENABLE(spinelvendor,
-    [AS_HELP_STRING([--enable-spinelvendor],[Enable Spinel vendor command support @<:@default=no@:>@.])],
+AC_ARG_WITH(
+    [ncp-vendor-hook-source],
+    [AS_HELP_STRING([--with-ncp-vendor-hook-source=<VENDOR_HOOK.CPP>],[Specify a C++ file that implements the NCP vendor hook. @<:@default=none@:>@.])],
     [
-        case "${enableval}" in
+        if test "${withval}" = "no"
+        then OPENTHREAD_ENABLE_NCP_VENDOR_HOOK=0
+        elif test '!' -f "${withval}"
+        then AC_MSG_ERROR([Can't open ${withval} for --with-ncp-vendor-hook-source])
+        else
+            OPENTHREAD_ENABLE_NCP_VENDOR_HOOK=1
 
-        no|yes)
-            enable_vendor=${enableval}
-            ;;
-
-        *)
-            AC_MSG_ERROR([Invalid value ${enable_vendor} for --enable-spinelvendor])
-            ;;
-        esac
+            # Get the absolute path.
+            OPENTHREAD_NCP_VENDOR_HOOK_SOURCE=$(cd `dirname ${withval}` && pwd)/$(basename ${withval})
+        fi
     ],
-    [enable_vendor=no])
+    [
+        OPENTHREAD_ENABLE_NCP_VENDOR_HOOK=0
+    ])
 
-if test "$enable_vendor" = "yes"; then
-    OPENTHREAD_ENABLE_SPINEL_VENDOR_SUPPORT=1
-else
-    OPENTHREAD_ENABLE_SPINEL_VENDOR_SUPPORT=0
-fi
-
-AC_MSG_CHECKING([whether to enable spinel vendor command support])
-AC_MSG_RESULT(${enable_vendor})
-AC_SUBST(OPENTHREAD_ENABLE_SPINEL_VENDOR_SUPPORT)
-AM_CONDITIONAL([OPENTHREAD_ENABLE_SPINEL_VENDOR_SUPPORT], [test "${enable_vendor}" = "yes"])
-AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_SPINEL_VENDOR_SUPPORT],[${OPENTHREAD_ENABLE_SPINEL_VENDOR_SUPPORT}],[Define to 1 if you want to implement Spinel vendor command support])
+AC_MSG_CHECKING([for NCP vendor hook source])
+AC_MSG_RESULT(${OPENTHREAD_NCP_VENDOR_HOOK_SOURCE-none})
+AC_SUBST(OPENTHREAD_NCP_VENDOR_HOOK_SOURCE)
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_NCP_VENDOR_HOOK],[${OPENTHREAD_ENABLE_NCP_VENDOR_HOOK}],[Define to 1 if using NCP vendor hook])
+AM_CONDITIONAL([OPENTHREAD_ENABLE_NCP_VENDOR_HOOK], [test "${OPENTHREAD_ENABLE_NCP_VENDOR_HOOK}" = "1"])
 
 #
 # Child Supervision
@@ -1534,6 +1563,7 @@ AC_MSG_NOTICE([
   OpenThread NCP-MTD support                : ${enable_ncp_app_mtd}
   OpenThread NCP-FTD support                : ${enable_ncp_app_ftd}
   OpenThread NCP-BUS Configuration          : ${with_ncp_bus}
+  OpenThread NCP Vendor Hook Source         : ${with_ncp_vendor_hook_source}
   OpenThread Multiple Instances support     : ${enable_multiple_instances}
   OpenThread MTD Network Diagnostic support : ${enable_mtd_network_diagnostic}
   OpenThread builtin mbedtls support        : ${enable_builtin_mbedtls}
@@ -1542,10 +1572,10 @@ AC_MSG_NOTICE([
   OpenThread Joiner support                 : ${enable_joiner}
   OpenThread DTLS support                   : ${enable_dtls}
   OpenThread Jam Detection support          : ${enable_jam_detection}
+  OpenThread Channel Monitor support        : ${enable_channel_monitor}
   OpenThread MAC Filter support             : ${enable_mac_filter}
   OpenThread Diagnostics support            : ${enable_diag}
   OpenThread Child Supervision support      : ${enable_child_supervision}
-  OpenThread Spinel vendor specific support : ${enable_vendor}
   OpenThread Legacy network support         : ${enable_legacy}
   OpenThread Certification log support      : ${enable_cert_log}
   OpenThread DHCPv6 Server support          : ${enable_dhcp6_server}

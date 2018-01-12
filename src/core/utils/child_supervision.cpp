@@ -39,6 +39,7 @@
 #include "common/code_utils.hpp"
 #include "common/instance.hpp"
 #include "common/logging.hpp"
+#include "common/owner-locator.hpp"
 #include "thread/thread_netif.hpp"
 
 namespace ot {
@@ -132,7 +133,7 @@ void ChildSupervisor::UpdateOnSend(Child &aChild)
 
 void ChildSupervisor::HandleTimer(Timer &aTimer)
 {
-    GetOwner(aTimer).HandleTimer();
+    aTimer.GetOwner<ChildSupervisor>().HandleTimer();
 }
 
 void ChildSupervisor::HandleTimer(void)
@@ -163,17 +164,6 @@ void ChildSupervisor::HandleTimer(void)
 
 exit:
     return;
-}
-
-ChildSupervisor &ChildSupervisor::GetOwner(const Context &aContext)
-{
-#if OPENTHREAD_ENABLE_MULTIPLE_INSTANCES
-    ChildSupervisor &supervisor = *static_cast<ChildSupervisor *>(aContext.GetContext());
-#else
-    ChildSupervisor &supervisor = Instance::Get().GetThreadNetif().GetChildSupervisor();
-    OT_UNUSED_VARIABLE(aContext);
-#endif
-    return supervisor;
 }
 
 #endif // #if OPENTHREAD_FTD
@@ -224,9 +214,7 @@ void SupervisionListener::RestartTimer(void)
 {
     ThreadNetif &netif = GetNetif();
 
-    // Restart the timer, if the timeout value is non-zero and the device is a sleepy child.
-
-    if ((mTimeout != 0) && (netif.GetMle().GetRole() == OT_DEVICE_ROLE_CHILD) &&
+    if ((mTimeout != 0) && (netif.GetMle().GetRole() != OT_DEVICE_ROLE_DISABLED) &&
         (netif.GetMeshForwarder().GetRxOnWhenIdle() == false))
     {
         mTimer.Start(TimerMilli::SecToMsec(mTimeout));
@@ -239,7 +227,7 @@ void SupervisionListener::RestartTimer(void)
 
 void SupervisionListener::HandleTimer(Timer &aTimer)
 {
-    GetOwner(aTimer).HandleTimer();
+    aTimer.GetOwner<SupervisionListener>().HandleTimer();
 }
 
 void SupervisionListener::HandleTimer(void)
@@ -255,17 +243,6 @@ void SupervisionListener::HandleTimer(void)
 
 exit:
     RestartTimer();
-}
-
-SupervisionListener &SupervisionListener::GetOwner(const Context &aContext)
-{
-#if OPENTHREAD_ENABLE_MULTIPLE_INSTANCES
-    SupervisionListener &listener = *static_cast<SupervisionListener *>(aContext.GetContext());
-#else
-    SupervisionListener &listener = Instance::Get().GetThreadNetif().GetSupervisionListener();
-    OT_UNUSED_VARIABLE(aContext);
-#endif
-    return listener;
 }
 
 #endif // #if OPENTHREAD_ENABLE_CHILD_SUPERVISION
