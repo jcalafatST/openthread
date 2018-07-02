@@ -43,9 +43,11 @@
 
 #include <common/code_utils.hpp>
 #include <platform-config.h>
+#include <openthread/platform/alarm-micro.h>
 #include <openthread/platform/diag.h>
 #include <openthread/platform/logging.h>
 #include <openthread/platform/radio.h>
+#include <openthread/platform/time.h>
 
 #include "platform-nrf5.h"
 #include "platform.h"
@@ -78,6 +80,12 @@ static otRadioFrame sReceivedFrames[NRF_802154_RX_BUFFERS];
 static otRadioFrame sTransmitFrame;
 static uint8_t      sTransmitPsdu[OT_RADIO_FRAME_MAX_SIZE + 1];
 
+#if OPENTHREAD_CONFIG_ENABLE_TIME_SYNC
+static otRadioIeInfo sTransmitIeInfo;
+static otRadioIeInfo sReceivedIeInfos[NRF_802154_RX_BUFFERS];
+static otInstance *  sInstance = NULL;
+#endif
+
 static otRadioFrame sAckFrame;
 
 static int8_t sDefaultTxPower;
@@ -88,10 +96,9 @@ static int8_t   sEnergyDetected;
 
 typedef enum {
     kPendingEventSleep,                // Requested to enter Sleep state.
-    kPendingEventTransmit,             // Frame is queued for transmission.
     kPendingEventFrameTransmitted,     // Transmitted frame and received ACK (if requested).
     kPendingEventChannelAccessFailure, // Failed to transmit frame (channel busy).
-    kPendingEventInvalidAck,           // Failed to transmit frame (received invalid ACK).
+    kPendingEventInvalidOrNoAck,       // Failed to transmit frame (received invalid or no ACK).
     kPendingEventReceiveFailed,        // Failed to receive a valid frame.
     kPendingEventEnergyDetectionStart, // Requested to start Energy Detection procedure.
     kPendingEventEnergyDetected,       // Energy Detection finished.
@@ -104,6 +111,9 @@ static void dataInit(void)
     sDisabled = true;
 
     sTransmitFrame.mPsdu = sTransmitPsdu + 1;
+#if OPENTHREAD_CONFIG_ENABLE_TIME_SYNC
+    sTransmitFrame.mIeInfo = &sTransmitIeInfo;
+#endif
 
     sReceiveError = OT_ERROR_NONE;
 
@@ -158,10 +168,6 @@ static inline void clearPendingEvents(void)
     volatile uint32_t pendingEvents;
     uint32_t          bitsToRemain = ~(0UL);
 
-    bitsToRemain &= ~(1UL << kPendingEventFrameTransmitted);
-    bitsToRemain &= ~(1UL << kPendingEventChannelAccessFailure);
-    bitsToRemain &= ~(1UL << kPendingEventInvalidAck);
-
     bitsToRemain &= ~(1UL << kPendingEventSleep);
 
     do
@@ -171,6 +177,7 @@ static inline void clearPendingEvents(void)
     } while (__STREXW(pendingEvents, (unsigned long volatile *)&sPendingEvents));
 }
 
+#if !OPENTHREAD_CONFIG_ENABLE_PLATFORM_EUI64_CUSTOM_SOURCE
 void otPlatRadioGetIeeeEui64(otInstance *aInstance, uint8_t *aIeeeEui64)
 {
     (void)aInstance;
@@ -180,6 +187,7 @@ void otPlatRadioGetIeeeEui64(otInstance *aInstance, uint8_t *aIeeeEui64)
 
     memcpy(aIeeeEui64, &factoryAddress, sizeof(factoryAddress));
 }
+#endif // OPENTHREAD_CONFIG_ENABLE_PLATFORM_EUI64_CUSTOM_SOURCE
 
 void otPlatRadioSetPanId(otInstance *aInstance, uint16_t aPanId)
 {
@@ -325,24 +333,36 @@ otError otPlatRadioReceive(otInstance *aInstance, uint8_t aChannel)
 
 otError otPlatRadioTransmit(otInstance *aInstance, otRadioFrame *aFrame)
 {
-    (void)aInstance;
+#if OPENTHREAD_CONFIG_ENABLE_TIME_SYNC
+    sInstance = aInstance;
+#endif
+
+    otError result = OT_ERROR_NONE;
 
     aFrame->mPsdu[-1] = aFrame->mLength;
 
     nrf_802154_channel_set(aFrame->mChannel);
 
-    if (nrf_802154_transmit_raw(&aFrame->mPsdu[-1], true))
+    if (aFrame->mInfo.mTxInfo.mIsCcaEnabled)
     {
-        clearPendingEvents();
-        otPlatRadioTxStarted(aInstance, aFrame);
+        nrf_802154_transmit_csma_ca_raw(&aFrame->mPsdu[-1]);
     }
     else
     {
-        clearPendingEvents();
-        setPendingEvent(kPendingEventTransmit);
+        if (!nrf_802154_transmit_raw(&aFrame->mPsdu[-1], false))
+        {
+            result = OT_ERROR_FAILED;
+        }
     }
 
-    return OT_ERROR_NONE;
+    clearPendingEvents();
+
+    if (result == OT_ERROR_NONE)
+    {
+        otPlatRadioTxStarted(aInstance, aFrame);
+    }
+
+    return result;
 }
 
 otRadioFrame *otPlatRadioGetTransmitBuffer(otInstance *aInstance)
@@ -363,7 +383,7 @@ otRadioCaps otPlatRadioGetCaps(otInstance *aInstance)
 {
     (void)aInstance;
 
-    return OT_RADIO_CAPS_ENERGY_SCAN;
+    return (otRadioCaps)(OT_RADIO_CAPS_ENERGY_SCAN | OT_RADIO_CAPS_ACK_TIMEOUT | OT_RADIO_CAPS_CSMA_BACKOFF);
 }
 
 bool otPlatRadioGetPromiscuous(otInstance *aInstance)
@@ -553,19 +573,10 @@ void nrf5RadioProcess(otInstance *aInstance)
         }
     }
 
-    if (isPendingEventSet(kPendingEventTransmit))
-    {
-        nrf_802154_channel_set(sTransmitFrame.mChannel);
-
-        if (nrf_802154_transmit_raw(sTransmitPsdu, true))
-        {
-            resetPendingEvent(kPendingEventTransmit);
-            otPlatRadioTxStarted(aInstance, &sTransmitFrame);
-        }
-    }
-
     if (isPendingEventSet(kPendingEventFrameTransmitted))
     {
+        resetPendingEvent(kPendingEventFrameTransmitted);
+
 #if OPENTHREAD_ENABLE_DIAG
 
         if (otPlatDiagModeGet())
@@ -584,12 +595,12 @@ void nrf5RadioProcess(otInstance *aInstance)
             nrf_802154_buffer_free_raw(sAckFrame.mPsdu - 1);
             sAckFrame.mPsdu = NULL;
         }
-
-        resetPendingEvent(kPendingEventFrameTransmitted);
     }
 
     if (isPendingEventSet(kPendingEventChannelAccessFailure))
     {
+        resetPendingEvent(kPendingEventChannelAccessFailure);
+
 #if OPENTHREAD_ENABLE_DIAG
 
         if (otPlatDiagModeGet())
@@ -601,12 +612,12 @@ void nrf5RadioProcess(otInstance *aInstance)
         {
             otPlatRadioTxDone(aInstance, &sTransmitFrame, NULL, OT_ERROR_CHANNEL_ACCESS_FAILURE);
         }
-
-        resetPendingEvent(kPendingEventChannelAccessFailure);
     }
 
-    if (isPendingEventSet(kPendingEventInvalidAck))
+    if (isPendingEventSet(kPendingEventInvalidOrNoAck))
     {
+        resetPendingEvent(kPendingEventInvalidOrNoAck);
+
 #if OPENTHREAD_ENABLE_DIAG
 
         if (otPlatDiagModeGet())
@@ -618,12 +629,12 @@ void nrf5RadioProcess(otInstance *aInstance)
         {
             otPlatRadioTxDone(aInstance, &sTransmitFrame, NULL, OT_ERROR_NO_ACK);
         }
-
-        resetPendingEvent(kPendingEventInvalidAck);
     }
 
     if (isPendingEventSet(kPendingEventReceiveFailed))
     {
+        resetPendingEvent(kPendingEventReceiveFailed);
+
 #if OPENTHREAD_ENABLE_DIAG
 
         if (otPlatDiagModeGet())
@@ -635,15 +646,13 @@ void nrf5RadioProcess(otInstance *aInstance)
         {
             otPlatRadioReceiveDone(aInstance, NULL, sReceiveError);
         }
-
-        resetPendingEvent(kPendingEventReceiveFailed);
     }
 
     if (isPendingEventSet(kPendingEventEnergyDetected))
     {
-        otPlatRadioEnergyScanDone(aInstance, sEnergyDetected);
-
         resetPendingEvent(kPendingEventEnergyDetected);
+
+        otPlatRadioEnergyScanDone(aInstance, sEnergyDetected);
     }
 
     if (isPendingEventSet(kPendingEventSleep))
@@ -665,7 +674,11 @@ void nrf5RadioProcess(otInstance *aInstance)
     }
 }
 
+#if OPENTHREAD_CONFIG_ENABLE_TIME_SYNC
+void nrf_802154_received_timestamp_raw(uint8_t *p_data, int8_t power, uint8_t lqi, uint32_t time)
+#else
 void nrf_802154_received_raw(uint8_t *p_data, int8_t power, uint8_t lqi)
+#endif
 {
     otRadioFrame *receivedFrame = NULL;
 
@@ -674,23 +687,32 @@ void nrf_802154_received_raw(uint8_t *p_data, int8_t power, uint8_t lqi)
         if (sReceivedFrames[i].mPsdu == NULL)
         {
             receivedFrame = &sReceivedFrames[i];
+
+            memset(receivedFrame, 0, sizeof(*receivedFrame));
+#if OPENTHREAD_CONFIG_ENABLE_TIME_SYNC
+            receivedFrame->mIeInfo = &sReceivedIeInfos[i];
+#endif
             break;
         }
     }
 
     assert(receivedFrame != NULL);
 
-    memset(receivedFrame, 0, sizeof(*receivedFrame));
-
-    receivedFrame->mPsdu    = &p_data[1];
-    receivedFrame->mLength  = p_data[0];
-    receivedFrame->mRssi    = power;
-    receivedFrame->mLqi     = lqi;
-    receivedFrame->mChannel = nrf_802154_channel_get();
+    receivedFrame->mPsdu               = &p_data[1];
+    receivedFrame->mLength             = p_data[0];
+    receivedFrame->mInfo.mRxInfo.mRssi = power;
+    receivedFrame->mInfo.mRxInfo.mLqi  = lqi;
+    receivedFrame->mChannel            = nrf_802154_channel_get();
 #if OPENTHREAD_ENABLE_RAW_LINK_API
-    uint64_t timestamp   = nrf5AlarmGetCurrentTime();
-    receivedFrame->mMsec = timestamp / US_PER_MS;
-    receivedFrame->mUsec = timestamp - receivedFrame->mMsec * US_PER_MS;
+    uint64_t timestamp                 = nrf5AlarmGetCurrentTime();
+    receivedFrame->mInfo.mRxInfo.mMsec = timestamp / US_PER_MS;
+    receivedFrame->mInfo.mRxInfo.mUsec = timestamp - receivedFrame->mInfo.mRxInfo.mMsec * US_PER_MS;
+#endif
+#if OPENTHREAD_CONFIG_ENABLE_TIME_SYNC
+    // Get the timestamp when the SFD was received.
+    uint32_t offset =
+        (int32_t)otPlatAlarmMicroGetNow() - (int32_t)nrf_802154_first_symbol_timestamp_get(time, p_data[0]);
+    receivedFrame->mIeInfo->mTimestamp = otPlatTimeGet() - offset;
 #endif
 
     PlatformEventSignalPending();
@@ -714,6 +736,7 @@ void nrf_802154_receive_failed(nrf_802154_rx_error_t error)
 
     case NRF_802154_RX_ERROR_RUNTIME:
     case NRF_802154_RX_ERROR_TIMESLOT_ENDED:
+    case NRF_802154_RX_ERROR_ABORTED:
         sReceiveError = OT_ERROR_FAILED;
         break;
 
@@ -734,11 +757,11 @@ void nrf_802154_transmitted_raw(const uint8_t *aFrame, uint8_t *aAckPsdu, int8_t
     }
     else
     {
-        sAckFrame.mPsdu    = &aAckPsdu[1];
-        sAckFrame.mLength  = aAckPsdu[0];
-        sAckFrame.mRssi    = aPower;
-        sAckFrame.mLqi     = aLqi;
-        sAckFrame.mChannel = nrf_802154_channel_get();
+        sAckFrame.mPsdu               = &aAckPsdu[1];
+        sAckFrame.mLength             = aAckPsdu[0];
+        sAckFrame.mInfo.mRxInfo.mRssi = aPower;
+        sAckFrame.mInfo.mRxInfo.mLqi  = aLqi;
+        sAckFrame.mChannel            = nrf_802154_channel_get();
     }
 
     setPendingEvent(kPendingEventFrameTransmitted);
@@ -756,9 +779,13 @@ void nrf_802154_transmit_failed(const uint8_t *aFrame, nrf_802154_tx_error_t err
         break;
 
     case NRF_802154_TX_ERROR_INVALID_ACK:
+    case NRF_802154_TX_ERROR_NO_ACK:
     case NRF_802154_TX_ERROR_NO_MEM:
-        setPendingEvent(kPendingEventInvalidAck);
+        setPendingEvent(kPendingEventInvalidOrNoAck);
         break;
+
+    default:
+        assert(false);
     }
 }
 
@@ -774,3 +801,27 @@ int8_t otPlatRadioGetReceiveSensitivity(otInstance *aInstance)
     (void)aInstance;
     return NRF52840_RECEIVE_SENSITIVITY;
 }
+
+#if OPENTHREAD_CONFIG_ENABLE_TIME_SYNC
+void nrf_802154_tx_started(const uint8_t *aFrame)
+{
+    assert(aFrame == sTransmitPsdu);
+
+    if (sTransmitFrame.mIeInfo->mTimeIeOffset != 0)
+    {
+        uint8_t *timeIe = sTransmitFrame.mPsdu + sTransmitFrame.mIeInfo->mTimeIeOffset;
+        uint64_t time   = otPlatTimeGet() + sTransmitFrame.mIeInfo->mNetworkTimeOffset;
+
+        *timeIe = sTransmitFrame.mIeInfo->mTimeSyncSeq;
+
+        *(++timeIe) = (uint8_t)(time & 0xff);
+        for (uint8_t i = 1; i < sizeof(uint64_t); i++)
+        {
+            time        = time >> 8;
+            *(++timeIe) = (uint8_t)(time & 0xff);
+        }
+
+        otPlatRadioFrameUpdated(sInstance, &sTransmitFrame);
+    }
+}
+#endif

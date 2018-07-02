@@ -29,11 +29,13 @@
 
 import sys
 import time
+import re
 import random
 import weakref
 import subprocess
 import socket
 import asyncore
+import inspect
 
 #----------------------------------------------------------------------------------------------------------------------
 # wpantund properties
@@ -51,6 +53,7 @@ WPAN_NODE_TYPE                                 = 'Network:NodeType'
 WPAN_ROLE                                      = 'Network:Role'
 WPAN_PARTITION_ID                              = 'Network:PartitionId'
 WPAN_NCP_VERSION                               = 'NCP:Version'
+WPAN_NCP_MCU_POWER_STATE                       = "NCP:MCUPowerState"
 WPAN_NETWORK_ALLOW_JOIN                        = 'com.nestlabs.internal:Network:AllowingJoin'
 WPAN_NETWORK_PASSTHRU_PORT                     = 'com.nestlabs.internal:Network:PassthruPort'
 
@@ -60,36 +63,36 @@ WPAN_IP6_MESH_LOCAL_PREFIX                     = "IPv6:MeshLocalPrefix"
 WPAN_IP6_ALL_ADDRESSES                         = "IPv6:AllAddresses"
 WPAN_IP6_MULTICAST_ADDRESSES                   = "IPv6:MulticastAddresses"
 
-WPAN_THREAD_RLOC16                             =  "Thread:RLOC16"
-WPAN_THREAD_ROUTER_ID                          =  "Thread:RouterID"
-WPAN_THREAD_LEADER_ADDRESS                     =  "Thread:Leader:Address"
-WPAN_THREAD_LEADER_ROUTER_ID                   =  "Thread:Leader:RouterID"
-WPAN_THREAD_LEADER_WEIGHT                      =  "Thread:Leader:Weight"
-WPAN_THREAD_LEADER_LOCAL_WEIGHT                =  "Thread:Leader:LocalWeight"
-WPAN_THREAD_LEADER_NETWORK_DATA                =  "Thread:Leader:NetworkData"
-WPAN_THREAD_STABLE_LEADER_NETWORK_DATA         =  "Thread:Leader:StableNetworkData"
-WPAN_THREAD_NETWORK_DATA                       =  "Thread:NetworkData"
-WPAN_THREAD_CHILD_TABLE                        =  "Thread:ChildTable"
-WPAN_THREAD_CHILD_TABLE_ASVALMAP               =  "Thread:ChildTable:AsValMap"
-WPAN_THREAD_CHILD_TABLE_ADDRESSES              =  "Thread:ChildTable:Addresses"
-WPAN_THREAD_NEIGHBOR_TABLE                     =  "Thread:NeighborTable"
-WPAN_THREAD_NEIGHBOR_TABLE_ASVALMAP            =  "Thread:NeighborTable:AsValMap"
-WPAN_THREAD_ROUTER_TABLE                       =  "Thread:RouterTable"
-WPAN_THREAD_ROUTER_TABLE_ASVALMAP              =  "Thread:RouterTable:AsValMap"
-WPAN_THREAD_NETWORK_DATA_VERSION               =  "Thread:NetworkDataVersion"
-WPAN_THREAD_STABLE_NETWORK_DATA                =  "Thread:StableNetworkData"
-WPAN_THREAD_STABLE_NETWORK_DATA_VERSION        =  "Thread:StableNetworkDataVersion"
-WPAN_THREAD_PREFERRED_ROUTER_ID                =  "Thread:PreferredRouterID"
-WPAN_THREAD_COMMISSIONER_ENABLED               =  "Thread:Commissioner:Enabled"
-WPAN_THREAD_DEVICE_MODE                        =  "Thread:DeviceMode"
-WPAN_THREAD_OFF_MESH_ROUTES                    =  "Thread:OffMeshRoutes"
-WPAN_THREAD_ON_MESH_PREFIXES                   =  "Thread:OnMeshPrefixes"
-WPAN_THREAD_ROUTER_ROLE_ENABLED                =  "Thread:RouterRole:Enabled"
-WPAN_THREAD_CONFIG_FILTER_RLOC_ADDRESSES       =  "Thread:Config:FilterRLOCAddresses"
-WPAN_THREAD_ACTIVE_DATASET                     =  "Thread:ActiveDataset"
-WPAN_THREAD_ACTIVE_DATASET_ASVALMAP            =  "Thread:ActiveDataset:AsValMap"
-WPAN_THREAD_PENDING_DATASET                    =  "Thread:PendingDataset"
-WPAN_THREAD_PENDING_DATASET_ASVALMAP           =  "Thread:PendingDataset:AsValMap"
+WPAN_THREAD_RLOC16                             = "Thread:RLOC16"
+WPAN_THREAD_ROUTER_ID                          = "Thread:RouterID"
+WPAN_THREAD_LEADER_ADDRESS                     = "Thread:Leader:Address"
+WPAN_THREAD_LEADER_ROUTER_ID                   = "Thread:Leader:RouterID"
+WPAN_THREAD_LEADER_WEIGHT                      = "Thread:Leader:Weight"
+WPAN_THREAD_LEADER_LOCAL_WEIGHT                = "Thread:Leader:LocalWeight"
+WPAN_THREAD_LEADER_NETWORK_DATA                = "Thread:Leader:NetworkData"
+WPAN_THREAD_STABLE_LEADER_NETWORK_DATA         = "Thread:Leader:StableNetworkData"
+WPAN_THREAD_NETWORK_DATA                       = "Thread:NetworkData"
+WPAN_THREAD_CHILD_TABLE                        = "Thread:ChildTable"
+WPAN_THREAD_CHILD_TABLE_ASVALMAP               = "Thread:ChildTable:AsValMap"
+WPAN_THREAD_CHILD_TABLE_ADDRESSES              = "Thread:ChildTable:Addresses"
+WPAN_THREAD_NEIGHBOR_TABLE                     = "Thread:NeighborTable"
+WPAN_THREAD_NEIGHBOR_TABLE_ASVALMAP            = "Thread:NeighborTable:AsValMap"
+WPAN_THREAD_ROUTER_TABLE                       = "Thread:RouterTable"
+WPAN_THREAD_ROUTER_TABLE_ASVALMAP              = "Thread:RouterTable:AsValMap"
+WPAN_THREAD_NETWORK_DATA_VERSION               = "Thread:NetworkDataVersion"
+WPAN_THREAD_STABLE_NETWORK_DATA                = "Thread:StableNetworkData"
+WPAN_THREAD_STABLE_NETWORK_DATA_VERSION        = "Thread:StableNetworkDataVersion"
+WPAN_THREAD_PREFERRED_ROUTER_ID                = "Thread:PreferredRouterID"
+WPAN_THREAD_COMMISSIONER_ENABLED               = "Thread:Commissioner:Enabled"
+WPAN_THREAD_DEVICE_MODE                        = "Thread:DeviceMode"
+WPAN_THREAD_OFF_MESH_ROUTES                    = "Thread:OffMeshRoutes"
+WPAN_THREAD_ON_MESH_PREFIXES                   = "Thread:OnMeshPrefixes"
+WPAN_THREAD_ROUTER_ROLE_ENABLED                = "Thread:RouterRole:Enabled"
+WPAN_THREAD_CONFIG_FILTER_RLOC_ADDRESSES       = "Thread:Config:FilterRLOCAddresses"
+WPAN_THREAD_ACTIVE_DATASET                     = "Thread:ActiveDataset"
+WPAN_THREAD_ACTIVE_DATASET_ASVALMAP            = "Thread:ActiveDataset:AsValMap"
+WPAN_THREAD_PENDING_DATASET                    = "Thread:PendingDataset"
+WPAN_THREAD_PENDING_DATASET_ASVALMAP           = "Thread:PendingDataset:AsValMap"
 
 WPAN_OT_LOG_LEVEL                              = "OpenThread:LogLevel"
 WPAN_OT_STEERING_DATA_ADDRESS                  = "OpenThread:SteeringData:Address"
@@ -123,6 +126,14 @@ WPAN_CHANNEL_MONITOR_SAMPLE_COUNT              = "ChannelMonitor:SampleCount"
 WPAN_CHANNEL_MONITOR_CHANNEL_QUALITY           = "ChannelMonitor:ChannelQuality"
 WPAN_CHANNEL_MONITOR_CHANNEL_QUALITY_ASVALMAP  = "ChannelMonitor:ChannelQuality:AsValMap"
 
+WPAN_CHANNEL_MANAGER_NEW_CHANNEL               = "ChannelManager:NewChannel"
+WPAN_CHANNEL_MANAGER_DELAY                     = "ChannelManager:Delay"
+WPAN_CHANNEL_MANAGER_CHANNEL_SELECT            = "ChannelManager:ChannelSelect"
+WPAN_CHANNEL_MANAGER_AUTO_SELECT_ENABLED       = "ChannelManager:AutoSelect:Enabled"
+WPAN_CHANNEL_MANAGER_AUTO_SELECT_INTERVAL      = "ChannelManager:AutoSelect:Interval"
+WPAN_CHANNEL_MANAGER_SUPPORTED_CHANNEL_MASK    = "ChannelManager:SupportedChannelMask"
+WPAN_CHANNEL_MANAGER_FAVORED_CHANNEL_MASK      = "ChannelManager:FavoredChannelMask"
+
 #----------------------------------------------------------------------------------------------------------------------
 # Valid state values
 
@@ -138,6 +149,13 @@ STATE_ASSOCIATED                               =  '"associated"'
 STATE_ISOLATED                                 =  '"associated:no-parent"'
 STATE_NETWAKE_ASLEEP                           =  '"associated:netwake-asleep"'
 STATE_NETWAKE_WAKING                           =  '"associated:netwake-waking"'
+
+#-----------------------------------------------------------------------------------------------------------------------
+# MCU Power state from `WPAN_NCP_MCU_POWER_STATE`
+
+MCU_POWER_STATE_ON                             = '"on"'
+MCU_POWER_STATE_LOW_POWER                      = '"low-power"'
+MCU_POWER_STATE_OFF                            = '"off"'
 
 #-----------------------------------------------------------------------------------------------------------------------
 # Node types (from `WPAN_NODE_TYPE` property)
@@ -173,7 +191,8 @@ def _log(text, new_line=True, flush=True):
 class Node(object):
     """ A wpantund OT NCP instance """
 
-    _VERBOSE = False     # defines the default verbosity setting (can be changed per `Node`)
+    _VERBOSE = False        # defines the default verbosity setting (can be changed per `Node`)
+    _SPEED_UP_FACTOR = 1    # defines the default time speed up factor
 
     # path to `wpantund`, `wpanctl` and `ot-ncp-ftd` code
     _WPANTUND = '/usr/local/sbin/wpantund'
@@ -200,8 +219,10 @@ class Node(object):
         self._interface_name = self._INTFC_NAME_PREFIX + str(index)
         self._verbose = verbose
 
+        ncp_socket_path = 'system:{} {} {}'.format(self._OT_NCP_FTD, index, self._SPEED_UP_FACTOR)
+
         cmd = self._WPANTUND + \
-               ' -o Config:NCP:SocketPath \"system:{} {}\"'.format(self._OT_NCP_FTD, index) + \
+               ' -o Config:NCP:SocketPath \"{}\"'.format(ncp_socket_path) + \
                ' -o Config:TUN:InterfaceName {}'.format(self._interface_name) + \
                ' -o Config:NCP:DriverName spinel' + \
                ' -o Daemon:SyslogMask \"all -debug\"'
@@ -335,9 +356,10 @@ class Node(object):
                             (' {}'.format(port) if port is not None else '') +
                             traffic_type)
 
-    def config_gateway(self, prefix, default_route=False):
+    def config_gateway(self, prefix, default_route=False, priority=None):
         return self.wpanctl('config-gateway ' + prefix +
-                            (' -d' if default_route else ''))
+                            (' -d' if default_route else '') +
+                            (' -P {}'.format(priority) if priority is not None else ''))
 
     def add_route(self, route_prefix, prefix_len_in_bytes=None, priority=None):
         """route priority [(>0 for high, 0 for medium, <0 for low)]"""
@@ -357,7 +379,7 @@ class Node(object):
     def is_associated(self):
         return self.get(WPAN_STATE) == STATE_ASSOCIATED
 
-    def join_node(self, node, node_type=JOIN_TYPE_ROUTER):
+    def join_node(self, node, node_type=JOIN_TYPE_ROUTER, should_set_key=True):
         """Join a network specified by another node, `node` should be a Node"""
 
         if not node.is_associated():
@@ -366,10 +388,12 @@ class Node(object):
         name = node.get(WPAN_NAME)
         panid = node.get(WPAN_PANID)
         xpanid = node.get(WPAN_XPANID)
-        netkey = node.get(WPAN_KEY)
         channel = node.get(WPAN_CHANNEL)
 
-        self.set(WPAN_KEY, netkey[1:-1], binary_data=True)
+        if should_set_key:
+            netkey = node.get(WPAN_KEY)
+            self.set(WPAN_KEY, netkey[1:-1], binary_data=True)
+
         return self.join(name[1:-1], channel=channel, node_type=node_type, panid=panid, xpanid=xpanid)
 
     def whitelist_node(self, node):
@@ -423,6 +447,13 @@ class Node(object):
                 else:
                     break
                 time.sleep(0.4)
+
+    @classmethod
+    def set_time_speedup_factor(cls, factor):
+        """Sets up the time speed up factor - should be set before creating any `Node` objects"""
+        if len(Node._all_nodes) != 0:
+            raise Node._NodeError('set_time_speedup_factor() cannot be called after creating a `Node`')
+        Node._SPEED_UP_FACTOR = factor
 
     #------------------------------------------------------------------------------------------------------------------
     # IPv6 message Sender and Receiver class
@@ -511,7 +542,7 @@ def _is_ipv6_addr_link_local(ip_addr):
 
 def _create_socket_address(ip_address, port):
     """Convert a given IPv6 address (string) and port number into a socket address"""
-    # `socket.getaddrinfo() returns a list of `(family, socktype, proto, canonname, sockaddr)` where `sockaddr`
+    # `socket.getaddrinfo()` returns a list of `(family, socktype, proto, canonname, sockaddr)` where `sockaddr`
     # (at index 4) can be used as input in socket methods (like `sendto()`, `bind()`, etc.).
     return socket.getaddrinfo(ip_address, port)[0][4]
 
@@ -714,14 +745,17 @@ class AsyncReceiver(asyncore.dispatcher):
 #-----------------------------------------------------------------------------------------------------------------------
 
 def verify(condition):
+    """Verifies that a `condition` is true, otherwise exits"""
     if not condition:
-        print 'verify() failed'
+        calling_frame = inspect.currentframe().f_back
+        print 'verify() failed at line {} in "{}"'.format(calling_frame.f_lineno, calling_frame.f_code.co_filename)
         exit(1)
 
 
 #-----------------------------------------------------------------------------------------------------------------------
 # Parsing `wpanctl` output
 
+#- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 class ScanResult(object):
     """ This object encapsulates a scan result (active/discover/energy scan)"""
 
@@ -798,4 +832,146 @@ def parse_scan_result(scan_result):
     """ Parses scan result string and returns an array of `ScanResult` objects"""
     return [ ScanResult(item) for item in scan_result.split('\n')[2:] ]  # skip first two lines which are table headers
 
+def parse_list(list_string):
+    """
+    Parses IPv6/prefix/route list string (output of wpanctl get for properties WPAN_IP6_ALL_ADDRESSES,
+    IP6_MULTICAST_ADDRESSES, WPAN_THREAD_ON_MESH_PREFIXES, ...)
+    Returns an array of strings each containing an IPv6/prefix/route entry.
+    """
+    # List string example (get(WPAN_IP6_ALL_ADDRESSES) output):
+    #
+    # '[\n
+    # \t"fdf4:5632:4940:0:8798:8701:85d4:e2be     prefix_len:64   origin:ncp      valid:forever   preferred:forever"\n
+    # \t"fe80::2092:9358:97ea:71c6                prefix_len:64   origin:ncp      valid:forever   preferred:forever"\n
+    # ]'
+    #
+    # We split the lines ('\n' as separator) and skip the first and last lines which are '['  and ']'.
+    # For each line, skip the first two characters (which are '\t"') and last character ('"'), then split the string
+    # using whitespace as separator. The first entry is the IPv6 address.
+    #
+    return [line[2:-1].split()[0] for line in list_string.split('\n')[1:-1]]
 
+#- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+class OnMeshPrefix(object):
+    """ This object encapsulates an on-mesh prefix"""
+
+    def __init__(self, text):
+
+        # Example of expected text:
+        #
+        # '\t"fd00:abba:cafe::       prefix_len:64   origin:user     stable:yes flags:0x31'
+        # ' [on-mesh:1 def-route:0 config:0 dhcp:0 slaac:1 pref:1 prio:med]"'
+
+        m = re.match('\t"([0-9a-fA-F:]+)\s*prefix_len:(\d+)\s+origin:(\w*)\s+stable:(\w*).*' +
+                    '\[on-mesh:(\d)\s+def-route:(\d)\s+config:(\d)\s+dhcp:(\d)\s+slaac:(\d)\s+pref:(\d)\s+prio:(\w*)\]',
+                     text)
+        verify(m is not None)
+        data = m.groups()
+
+        self._prefix     = data[0]
+        self._prefix_len = data[1]
+        self._origin     = data[2]
+        self._stable     = (data[3] == 'yes')
+        self._on_mesh    = (data[4] == '1')
+        self._def_route  = (data[5] == '1')
+        self._config     = (data[6] == '1')
+        self._dhcp       = (data[7] == '1')
+        self._slaac      = (data[8] == '1')
+        self._preffered  = (data[9] == '1')
+        self._priority   = (data[10])
+
+    @property
+    def prefix(self):
+        return self._prefix
+
+    @property
+    def prefix_len(self):
+        return self._prefix_len
+
+    @property
+    def origin(self):
+        return self._origin
+
+    @property
+    def priority(self):
+        return self._priority
+
+    def is_stable(self):
+        return self._stable
+
+    def is_on_mesh(self):
+        return self._on_mesh
+
+    def is_def_route(self):
+        return self._def_route
+
+    def is_config(self):
+        return self._config
+
+    def is_dhcp(self):
+        return self._dhcp
+
+    def is_slaac(self):
+        return self._slaac
+
+    def is_preffered(self):
+        return self._preffered
+
+    def __repr__(self):
+        return 'OnMeshPrefix({})'.format(self.__dict__)
+
+def parse_on_mesh_prefix_result(on_mesh_prefix_list):
+    """ Parses on-mesh prefix list string and returns an array of `OnMeshPrefix` objects"""
+    return [ OnMeshPrefix(item) for item in on_mesh_prefix_list.split('\n')[1:-1] ]
+
+#- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+class ChildEntry(object):
+    """ This object encapsulates an child entry"""
+
+    def __init__(self, text):
+
+        # Example of expected text:
+        #
+        # `\t"E24C5F67F4B8CBB9, RLOC16:d402, NetDataVer:175, LQIn:3, AveRssi:-20, LastRssi:-20, Timeout:120, Age:0, `
+        # `RxOnIdle:no, FFD:no, SecDataReq:yes, FullNetData:yes"`
+        #
+
+        # We get rid of the first two chars `\t"' and last char '"', split the rest using whitespace as seperator.
+        # Then remove any ',' at end of items in the list.
+        items = [item[:-1] if item[-1] ==',' else item for item in text[2:-1].split()]
+
+        # First item in the extended address
+        self._ext_address = items[0]
+
+        # Convert the rest into a dictionary by splitting using ':' as seperator
+        dict = {item.split(':')[0] : item.split(':')[1] for item in items[1:]}
+
+        self._rloc16     = dict['RLOC16']
+        self._timeout    = dict['Timeout']
+        self._rx_on_idle = (dict['RxOnIdle'] == 'yes')
+        self._ffd        = (dict['FFD'] == 'yes')
+
+    @property
+    def ext_address(self):
+        return self._ext_address
+
+    @property
+    def rloc16(self):
+        return self._rloc16
+
+    @property
+    def timeout(self):
+        return self._timeout
+
+    def is_rx_on_when_idle(self):
+        return self._rx_on_idle
+
+    def is_ffd(self):
+        return self._ffd
+
+    def __repr__(self):
+        return 'ChildEntry({})'.format(self.__dict__)
+
+def parse_child_table_result(child_table_list):
+    """ Parses child table list string and returns an array of `ChildEntry` objects"""
+    return [ ChildEntry(item) for item in child_table_list.split('\n')[1:-1] ]

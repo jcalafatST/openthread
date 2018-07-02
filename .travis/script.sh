@@ -42,6 +42,10 @@ set -x
 
 [ $BUILD_TARGET != scan-build ] || {
     ./bootstrap || die
+
+    # avoids "third_party/mbedtls/repo/library/ssl_srv.c:2904:9: warning: Value stored to 'p' is never read"
+    export CPPFLAGS=-DMBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED
+
     scan-build ./configure                \
         --enable-cli-app=all              \
         --enable-ncp-app=all              \
@@ -100,11 +104,12 @@ set -x
     git checkout -- . || die
     git clean -xfd || die
     ./bootstrap || die
-    COMMISSIONER=1 JOINER=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 make -f examples/Makefile-nrf52840 || die
+    BORDER_ROUTER=1 COAP=1 COMMISSIONER=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 FULL_LOGS=1 JOINER=1 MAC_FILTER=1 MTD_NETDIAG=1 SERVICE=1 TMF_PROXY=1 make -f examples/Makefile-nrf52840 || die
     arm-none-eabi-size  output/nrf52840/bin/ot-cli-ftd || die
     arm-none-eabi-size  output/nrf52840/bin/ot-cli-mtd || die
     arm-none-eabi-size  output/nrf52840/bin/ot-ncp-ftd || die
     arm-none-eabi-size  output/nrf52840/bin/ot-ncp-mtd || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-ncp-radio || die
 
     git checkout -- . || die
     git clean -xfd || die
@@ -168,11 +173,12 @@ set -x
     git checkout -- . || die
     git clean -xfd || die
     ./bootstrap || die
-    COMMISSIONER=1 JOINER=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 make -f examples/Makefile-nrf52840 || die
+    BORDER_ROUTER=1 COAP=1 COMMISSIONER=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 FULL_LOGS=1 JOINER=1 MAC_FILTER=1 MTD_NETDIAG=1 SERVICE=1 TMF_PROXY=1 make -f examples/Makefile-nrf52840 || die
     arm-none-eabi-size  output/nrf52840/bin/ot-cli-ftd || die
     arm-none-eabi-size  output/nrf52840/bin/ot-cli-mtd || die
     arm-none-eabi-size  output/nrf52840/bin/ot-ncp-ftd || die
     arm-none-eabi-size  output/nrf52840/bin/ot-ncp-mtd || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-ncp-radio || die
 
     git checkout -- . || die
     git clean -xfd || die
@@ -215,14 +221,14 @@ set -x
     arm-none-eabi-size  output/cc2538/bin/ot-ncp-ftd || die
     arm-none-eabi-size  output/cc2538/bin/ot-ncp-mtd || die
 
-    # git checkout -- . || die
-    # git clean -xfd || die
-    # ./bootstrap || die
-    # COMMISSIONER=1 JOINER=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 make -f examples/Makefile-da15000 || die
-    # arm-none-eabi-size  output/da15000/bin/ot-cli-ftd || die
-    # arm-none-eabi-size  output/da15000/bin/ot-cli-mtd || die
-    # arm-none-eabi-size  output/da15000/bin/ot-ncp-ftd || die
-    # arm-none-eabi-size  output/da15000/bin/ot-ncp-mtd || die
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    COMMISSIONER=1 JOINER=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 make -f examples/Makefile-da15000 || die
+    arm-none-eabi-size  output/da15000/bin/ot-cli-ftd || die
+    arm-none-eabi-size  output/da15000/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/da15000/bin/ot-ncp-ftd || die
+    arm-none-eabi-size  output/da15000/bin/ot-ncp-mtd || die
 
     git checkout -- . || die
     git clean -xfd || die
@@ -236,11 +242,12 @@ set -x
     git checkout -- . || die
     git clean -xfd || die
     ./bootstrap || die
-    COMMISSIONER=1 JOINER=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 make -f examples/Makefile-nrf52840 || die
+    BORDER_ROUTER=1 COAP=1 COMMISSIONER=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 FULL_LOGS=1 JOINER=1 MAC_FILTER=1 MTD_NETDIAG=1 SERVICE=1 TMF_PROXY=1 make -f examples/Makefile-nrf52840 || die
     arm-none-eabi-size  output/nrf52840/bin/ot-cli-ftd || die
     arm-none-eabi-size  output/nrf52840/bin/ot-cli-mtd || die
     arm-none-eabi-size  output/nrf52840/bin/ot-ncp-ftd || die
     arm-none-eabi-size  output/nrf52840/bin/ot-ncp-mtd || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-ncp-radio || die
 
     git checkout -- . || die
     git clean -xfd || die
@@ -280,6 +287,75 @@ set -x
     arc-elf32-size  output/emsk/bin/ot-cli-mtd || die
     arc-elf32-size  output/emsk/bin/ot-ncp-ftd || die
     arc-elf32-size  output/emsk/bin/ot-ncp-mtd || die
+}
+
+[ $BUILD_TARGET != arm-gcc7 ] || {
+    export PATH=/tmp/gcc-arm-none-eabi-7-2017-q4-major/bin:$PATH || die
+
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    COMMISSIONER=1 JOINER=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 make -f examples/Makefile-cc2538 || die
+    arm-none-eabi-size  output/cc2538/bin/ot-cli-ftd || die
+    arm-none-eabi-size  output/cc2538/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/cc2538/bin/ot-ncp-ftd || die
+    arm-none-eabi-size  output/cc2538/bin/ot-ncp-mtd || die
+
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    COMMISSIONER=1 JOINER=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 make -f examples/Makefile-da15000 || die
+    arm-none-eabi-size  output/da15000/bin/ot-cli-ftd || die
+    arm-none-eabi-size  output/da15000/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/da15000/bin/ot-ncp-ftd || die
+    arm-none-eabi-size  output/da15000/bin/ot-ncp-mtd || die
+
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    COMMISSIONER=1 JOINER=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 make -f examples/Makefile-kw41z || die
+    arm-none-eabi-size  output/kw41z/bin/ot-cli-ftd || die
+    arm-none-eabi-size  output/kw41z/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/kw41z/bin/ot-ncp-ftd || die
+    arm-none-eabi-size  output/kw41z/bin/ot-ncp-mtd || die
+
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    BORDER_ROUTER=1 COAP=1 COMMISSIONER=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 FULL_LOGS=1 JOINER=1 MAC_FILTER=1 MTD_NETDIAG=1 SERVICE=1 TMF_PROXY=1 make -f examples/Makefile-nrf52840 || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-cli-ftd || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-ncp-ftd || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-ncp-mtd || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-ncp-radio || die
+
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    make -f examples/Makefile-cc2650 || die
+    arm-none-eabi-size  output/cc2650/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/cc2650/bin/ot-ncp-mtd || die
+
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    COMMISSIONER=1 JOINER=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 make -f examples/Makefile-cc2652 || die
+    arm-none-eabi-size  output/cc2652/bin/ot-cli-ftd || die
+    arm-none-eabi-size  output/cc2652/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/cc2652/bin/ot-ncp-ftd || die
+    arm-none-eabi-size  output/cc2652/bin/ot-ncp-mtd || die
+
+    git checkout -- . || die
+    git clean -xfd || die
+    wget http://ww1.microchip.com/downloads/en/DeviceDoc/asf-standalone-archive-3.36.0.58.zip || die
+    unzip -qq asf-standalone-archive-3.36.0.58.zip || die
+    mv xdk-asf-3.36.0 third_party/microchip/asf || die
+    ./bootstrap || die
+    COMMISSIONER=1 JOINER=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 make -f examples/Makefile-samr21 || die
+    arm-none-eabi-size  output/samr21/bin/ot-cli-ftd || die
+    arm-none-eabi-size  output/samr21/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/samr21/bin/ot-ncp-ftd || die
+    arm-none-eabi-size  output/samr21/bin/ot-ncp-mtd || die
 }
 
 [ $BUILD_TARGET != posix ] || {
@@ -356,6 +432,13 @@ set -x
     COVERAGE=1 CFLAGS=-m32 CXXFLAGS=-m32 LDFLAGS=-m32 make -f examples/Makefile-posix check || die
 }
 
+[ $BUILD_TARGET != posix-app-cli ] || {
+    ./bootstrap || die
+    make -f examples/Makefile-posix || die
+    make -f src/posix/Makefile-posix || die
+    OT_CLI_PATH="$(pwd)/$(ls output/posix/*/bin/ot-cli)" RADIO_DEVICE="$(pwd)/$(ls output/*/bin/ot-ncp-radio)" COVERAGE=1 make -f src/posix/Makefile-posix check || die
+}
+
 [ $BUILD_TARGET != posix-mtd ] || {
     ./bootstrap || die
     COVERAGE=1 CFLAGS=-m32 CXXFLAGS=-m32 LDFLAGS=-m32 USE_MTD=1 make -f examples/Makefile-posix check || die
@@ -366,9 +449,16 @@ set -x
     make -f examples/Makefile-posix check configure_OPTIONS="--enable-ncp-app=ftd --with-ncp-bus=spi --with-examples=posix" || die
 }
 
+[ $BUILD_TARGET != posix-app-ncp ] || {
+    ./bootstrap || die
+    make -f examples/Makefile-posix || die
+    make -f src/posix/Makefile-posix || die
+    OT_NCP_PATH="$(pwd)/$(ls output/posix/*/bin/ot-ncp)" RADIO_DEVICE="$(pwd)/$(ls output/*/bin/ot-ncp-radio)" COVERAGE=1 NODE_TYPE=ncp-sim make -f src/posix/Makefile-posix check || die
+}
+
 [ $BUILD_TARGET != posix-ncp ] || {
     ./bootstrap || die
-    COVERAGE=1 NODE_TYPE=ncp-sim make -f examples/Makefile-posix check || die
+    NODE_TYPE=ncp-sim make -f examples/Makefile-posix check || die
 }
 
 [ $BUILD_TARGET != toranj-test-framework ] || {

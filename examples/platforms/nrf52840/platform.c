@@ -73,12 +73,16 @@ void PlatformInit(int argc, char *argv[])
 
     nrf_drv_clock_init();
 
-#if (OPENTHREAD_CONFIG_LOG_OUTPUT == OPENTHREAD_CONFIG_LOG_OUTPUT_PLATFORM_DEFINED)
+#if (OPENTHREAD_CONFIG_LOG_OUTPUT == OPENTHREAD_CONFIG_LOG_OUTPUT_PLATFORM_DEFINED) || \
+    (OPENTHREAD_CONFIG_LOG_OUTPUT == OPENTHREAD_CONFIG_LOG_OUTPUT_NCP_SPINEL)
     nrf5LogInit();
 #endif
     nrf5AlarmInit();
     nrf5RandomInit();
     nrf5UartInit();
+#ifndef SPIS_TRANSPORT_DISABLE
+    nrf5SpiSlaveInit();
+#endif
     nrf5MiscInit();
     nrf5CryptoInit();
     nrf5RadioInit();
@@ -91,10 +95,14 @@ void PlatformDeinit(void)
     nrf5RadioDeinit();
     nrf5CryptoDeinit();
     nrf5MiscDeinit();
+#ifndef SPIS_TRANSPORT_DISABLE
+    nrf5SpiSlaveDeinit();
+#endif
     nrf5UartDeinit();
     nrf5RandomDeinit();
     nrf5AlarmDeinit();
-#if (OPENTHREAD_CONFIG_LOG_OUTPUT == OPENTHREAD_CONFIG_LOG_OUTPUT_PLATFORM_DEFINED)
+#if (OPENTHREAD_CONFIG_LOG_OUTPUT == OPENTHREAD_CONFIG_LOG_OUTPUT_PLATFORM_DEFINED) || \
+    (OPENTHREAD_CONFIG_LOG_OUTPUT == OPENTHREAD_CONFIG_LOG_OUTPUT_NCP_SPINEL)
     nrf5LogDeinit();
 #endif
 }
@@ -110,6 +118,10 @@ void PlatformProcessDrivers(otInstance *aInstance)
     nrf5AlarmProcess(aInstance);
     nrf5RadioProcess(aInstance);
     nrf5UartProcess();
+    nrf5TempProcess();
+#ifndef SPIS_TRANSPORT_DISABLE
+    nrf5SpiSlaveProcess();
+#endif
 }
 
 __WEAK void PlatformEventSignalPending(void)

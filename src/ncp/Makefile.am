@@ -37,6 +37,7 @@ EXTRA_DIST                                        = \
 lib_LIBRARIES                                     = \
     libopenthread-ncp-mtd.a                         \
     libopenthread-ncp-ftd.a                         \
+    libopenthread-ncp-radio.a                       \
     $(NULL)
 
 
@@ -60,29 +61,35 @@ libopenthread_ncp_ftd_a_CPPFLAGS                  = \
     $(COMMON_CPPFLAGS)                              \
     $(NULL)
 
+libopenthread_ncp_radio_a_CPPFLAGS                = \
+    -DOPENTHREAD_RADIO=1                            \
+    $(COMMON_CPPFLAGS)                              \
+    $(NULL)
+
 COMMON_SOURCES                                    = \
     changed_props_set.cpp                           \
     changed_props_set.hpp                           \
-    ncp_base.hpp                                    \
-    ncp_base.cpp                                    \
-    ncp_base_mtd.cpp                                \
-    ncp_base_ftd.cpp                                \
-    ncp_base_radio.cpp                              \
-    ncp_buffer.cpp                                  \
-    ncp_buffer.hpp                                  \
-    spinel.c                                        \
-    spinel.h                                        \
-    spinel_decoder.hpp                              \
-    spinel_decoder.cpp                              \
-    spinel_encoder.hpp                              \
-    spinel_encoder.cpp                              \
-    spinel_platform.h                               \
-    ncp_spi.cpp                                     \
-    ncp_spi.hpp                                     \
     hdlc.cpp                                        \
     hdlc.hpp                                        \
+    ncp_base.cpp                                    \
+    ncp_base.hpp                                    \
+    ncp_base_ftd.cpp                                \
+    ncp_base_mtd.cpp                                \
+    ncp_base_radio.cpp                              \
+    ncp_base_dispatcher.cpp                         \
+    ncp_buffer.cpp                                  \
+    ncp_buffer.hpp                                  \
+    ncp_spi.cpp                                     \
+    ncp_spi.hpp                                     \
     ncp_uart.cpp                                    \
     ncp_uart.hpp                                    \
+    spinel.c                                        \
+    spinel.h                                        \
+    spinel_decoder.cpp                              \
+    spinel_decoder.hpp                              \
+    spinel_encoder.cpp                              \
+    spinel_encoder.hpp                              \
+    spinel_platform.h                               \
     $(NULL)
 
 if OPENTHREAD_ENABLE_NCP_VENDOR_HOOK
@@ -108,6 +115,10 @@ libopenthread_ncp_mtd_a_SOURCES                   = \
    $(NULL)
 
 libopenthread_ncp_ftd_a_SOURCES                   = \
+   $(COMMON_SOURCES)                                \
+   $(NULL)
+
+libopenthread_ncp_radio_a_SOURCES                 = \
    $(COMMON_SOURCES)                                \
    $(NULL)
 

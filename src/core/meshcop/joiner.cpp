@@ -100,7 +100,7 @@ otError Joiner::Start(const char *     aPSKd,
 
     VerifyOrExit(mState == OT_JOINER_STATE_IDLE, error = OT_ERROR_BUSY);
 
-    GetNotifier().SetFlags(OT_CHANGED_JOINER_STATE);
+    GetNotifier().Signal(OT_CHANGED_JOINER_STATE);
 
     // use extended address based on factory-assigned IEEE EUI-64
     GetJoinerId(joinerId);
@@ -168,7 +168,7 @@ void Joiner::Complete(otError aError)
     ThreadNetif &netif = GetNetif();
     mState             = OT_JOINER_STATE_IDLE;
     otError error      = OT_ERROR_NOT_FOUND;
-    GetNotifier().SetFlags(OT_CHANGED_JOINER_STATE);
+    GetNotifier().Signal(OT_CHANGED_JOINER_STATE);
 
     netif.GetCoapSecure().Disconnect();
 
@@ -196,11 +196,9 @@ void Joiner::HandleDiscoverResult(otActiveScanResult *aResult)
     if (aResult != NULL)
     {
         JoinerRouter joinerRouter;
-        char         logString[Mac::Address::kAddressStringSize];
 
         otLogDebgMeshCoP(GetInstance(), "Received Discovery Response (%s)",
-                         static_cast<Mac::ExtAddress &>(aResult->mExtAddress).ToString(logString, sizeof(logString)));
-        OT_UNUSED_VARIABLE(logString);
+                         static_cast<Mac::ExtAddress &>(aResult->mExtAddress).ToString().AsCString());
 
         // Joining is disabled if the Steering Data is not included
         if (aResult->mSteeringData.mLength == 0)
@@ -292,7 +290,7 @@ otError Joiner::TryNextJoin()
         joinerRouter->mPriority = 0;
 
         netif.GetMac().SetPanId(joinerRouter->mPanId);
-        netif.GetMac().SetChannel(joinerRouter->mChannel);
+        netif.GetMac().SetPanChannel(joinerRouter->mChannel);
         netif.GetIp6Filter().AddUnsecurePort(netif.GetCoapSecure().GetPort());
 
         messageInfo.GetPeerAddr().mFields.m16[0] = HostSwap16(0xfe80);

@@ -56,7 +56,7 @@ UdpExample::UdpExample(Interpreter &aInterpreter)
 
 otError UdpExample::ProcessHelp(int argc, char *argv[])
 {
-    for (unsigned int i = 0; i < sizeof(sCommands) / sizeof(sCommands[0]); i++)
+    for (unsigned int i = 0; i < OT_ARRAY_LENGTH(sCommands); i++)
     {
         mInterpreter.mServer->OutputFormat("%s\r\n", sCommands[i].mName);
     }
@@ -73,7 +73,7 @@ otError UdpExample::ProcessBind(int argc, char *argv[])
     otSockAddr sockaddr;
     long       value;
 
-    VerifyOrExit(argc == 2, error = OT_ERROR_PARSE);
+    VerifyOrExit(argc == 2, error = OT_ERROR_INVALID_ARGS);
 
     memset(&sockaddr, 0, sizeof(sockaddr));
 
@@ -98,7 +98,7 @@ otError UdpExample::ProcessConnect(int argc, char *argv[])
     otSockAddr sockaddr;
     long       value;
 
-    VerifyOrExit(argc == 2, error = OT_ERROR_PARSE);
+    VerifyOrExit(argc == 2, error = OT_ERROR_INVALID_ARGS);
 
     memset(&sockaddr, 0, sizeof(sockaddr));
 
@@ -142,7 +142,7 @@ otError UdpExample::ProcessSend(int argc, char *argv[])
 
     memset(&messageInfo, 0, sizeof(messageInfo));
 
-    VerifyOrExit(argc == 1 || argc == 3, error = OT_ERROR_PARSE);
+    VerifyOrExit(argc == 1 || argc == 3, error = OT_ERROR_INVALID_ARGS);
 
     if (argc == 3)
     {
@@ -180,7 +180,7 @@ otError UdpExample::Process(int argc, char *argv[])
 {
     otError error = OT_ERROR_PARSE;
 
-    for (size_t i = 0; i < sizeof(sCommands) / sizeof(sCommands[0]); i++)
+    for (size_t i = 0; i < OT_ARRAY_LENGTH(sCommands); i++)
     {
         if (strcmp(argv[0], sCommands[i].mName) == 0)
         {

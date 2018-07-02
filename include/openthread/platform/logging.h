@@ -32,8 +32,8 @@
  *   This file includes the platform abstraction for the debug log service.
  */
 
-#ifndef LOGGING_H_
-#define LOGGING_H_
+#ifndef OPENTHREAD_PLATFORM_LOGGING_H_
+#define OPENTHREAD_PLATFORM_LOGGING_H_
 
 #include <stdarg.h>
 #include <stdint.h>
@@ -64,8 +64,9 @@ extern "C" {
 #define OT_LOG_LEVEL_NONE 0 ///< None
 #define OT_LOG_LEVEL_CRIT 1 ///< Critical
 #define OT_LOG_LEVEL_WARN 2 ///< Warning
-#define OT_LOG_LEVEL_INFO 3 ///< Info
-#define OT_LOG_LEVEL_DEBG 4 ///< Debug
+#define OT_LOG_LEVEL_NOTE 3 ///< Note
+#define OT_LOG_LEVEL_INFO 4 ///< Info
+#define OT_LOG_LEVEL_DEBG 5 ///< Debug
 
 /* note: The enum otLogRegion is found in 'openthread/types.h' */
 
@@ -100,4 +101,4 @@ void otPlatLogv(otLogLevel aLogLevel, otLogRegion aLogRegion, const char *aForma
 } // extern "C"
 #endif
 
-#endif // DEBUG_H_
+#endif // OPENTHREAD_PLATFORM_LOGGING_H_

@@ -74,12 +74,12 @@ AC_CONFIG_SRCDIR([include/openthread/openthread.h])
 # Tell autoconf where to find auxilliary build tools (e.g. config.guess,
 # install-sh, missing, etc.)
 #
-AC_CONFIG_AUX_DIR([third_party/nlbuild-autotools/repo/autoconf])
+AC_CONFIG_AUX_DIR([third_party/nlbuild-autotools/repo/third_party/autoconf])
 
 #
 # Tell autoconf where to find auxilliary M4 macros
 #
-AC_CONFIG_MACRO_DIR([third_party/nlbuild-autotools/repo/autoconf/m4])
+AC_CONFIG_MACRO_DIRS([third_party/nlbuild-autotools/repo/third_party/autoconf/m4 third_party/nlbuild-autotools/repo/autoconf/m4])
 
 #
 # Tell autoconf what file the package is using to aggregate C preprocessor
@@ -357,7 +357,7 @@ fi
 # Code style
 #
 
-AC_SUBST(PRETTY, ["clang-format"])
+AC_SUBST(PRETTY, ["\${abs_top_srcdir}/script/clang-format.sh"])
 AC_SUBST(PRETTY_ARGS, ["-style=file -i"])
 AC_SUBST(PRETTY_CHECK, ["\${abs_top_srcdir}/script/clang-format-check.sh"])
 AC_SUBST(PRETTY_CHECK_ARGS, [""])
@@ -372,6 +372,59 @@ AC_MSG_NOTICE([checking whether to build tests])
 NL_ENABLE_TESTS([yes])
 
 AM_CONDITIONAL([OPENTHREAD_BUILD_TESTS], [test "${nl_cv_build_tests}" = "yes"])
+
+#
+# Posix App
+#
+
+AC_ARG_ENABLE(
+    [posix-app],
+    [AS_HELP_STRING([--enable-posix-app],[Enable POSIX app(no|ncp|cli|all) @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+        all|both|yes)
+            enable_posix_app=yes
+            OPENTHREAD_ENABLE_POSIX_APP=1
+            OPENTHREAD_ENABLE_POSIX_APP_NCP=1
+            OPENTHREAD_ENABLE_POSIX_APP_CLI=1
+            ;;
+        no)
+            enable_posix_app=no
+            OPENTHREAD_ENABLE_POSIX_APP=0
+            OPENTHREAD_ENABLE_POSIX_APP_NCP=0
+            OPENTHREAD_ENABLE_POSIX_APP_CLI=0
+            ;;
+        ncp)
+            enable_posix_app=yes
+            OPENTHREAD_ENABLE_POSIX_APP=1
+            OPENTHREAD_ENABLE_POSIX_APP_NCP=1
+            OPENTHREAD_ENABLE_POSIX_APP_CLI=0
+            ;;
+        cli)
+            enable_posix_app=yes
+            OPENTHREAD_ENABLE_POSIX_APP=1
+            OPENTHREAD_ENABLE_POSIX_APP_NCP=0
+            OPENTHREAD_ENABLE_POSIX_APP_CLI=1
+            ;;
+        *)
+            AC_MSG_ERROR([Invalid value ${enableval} for --enable-posix-app])
+            ;;
+        esac
+    ],
+    [
+     enable_posix_app=no
+     OPENTHREAD_ENABLE_POSIX_APP=0
+     OPENTHREAD_ENABLE_POSIX_APP_NCP=0
+     OPENTHREAD_ENABLE_POSIX_APP_CLI=0])
+
+AC_MSG_CHECKING([posix-app])
+AC_MSG_RESULT(${enable_posix_app})
+AM_CONDITIONAL([OPENTHREAD_ENABLE_POSIX_APP],     [test "${OPENTHREAD_ENABLE_POSIX_APP}" == "1"])
+AM_CONDITIONAL([OPENTHREAD_ENABLE_POSIX_APP_NCP], [test "${OPENTHREAD_ENABLE_POSIX_APP_NCP}" == "1"])
+AM_CONDITIONAL([OPENTHREAD_ENABLE_POSIX_APP_CLI], [test "${OPENTHREAD_ENABLE_POSIX_APP_CLI}" == "1"])
+AC_SUBST(OPENTHREAD_ENABLE_POSIX_APP)
+AC_SUBST(OPENTHREAD_ENABLE_POSIX_APP_NCP)
+AC_SUBST(OPENTHREAD_ENABLE_POSIX_APP_CLI)
 
 #
 # CLI Library
@@ -413,9 +466,9 @@ AC_ARG_ENABLE(cli-app,
 
 AC_MSG_CHECKING([cli-app modes])
 AC_MSG_RESULT(${enable_cli_app})
-AM_CONDITIONAL([OPENTHREAD_ENABLE_CLI],     [test "${enable_cli_app}" == "yes"])
+AM_CONDITIONAL([OPENTHREAD_ENABLE_CLI],     [test "${enable_cli_app}" == "yes" -o "${OPENTHREAD_ENABLE_POSIX_APP_CLI}" == "1"])
 AM_CONDITIONAL([OPENTHREAD_ENABLE_CLI_MTD], [test "${enable_cli_app_mtd}" == "yes"])
-AM_CONDITIONAL([OPENTHREAD_ENABLE_CLI_FTD], [test "${enable_cli_app_ftd}" == "yes"])
+AM_CONDITIONAL([OPENTHREAD_ENABLE_CLI_FTD], [test "${enable_cli_app_ftd}" == "yes" -o "${OPENTHREAD_ENABLE_POSIX_APP_CLI}" == "1"])
 AC_SUBST(OPENTHREAD_ENABLE_CLI)
 AC_SUBST(OPENTHREAD_ENABLE_CLI_FTD)
 AC_SUBST(OPENTHREAD_ENABLE_CLI_MTD)
@@ -425,11 +478,11 @@ AC_SUBST(OPENTHREAD_ENABLE_CLI_MTD)
 # NCP app
 #
 AC_ARG_ENABLE(ncp-app,
-    [AS_HELP_STRING([--enable-ncp-app],[Enable NCP support (no|mtd|ftd|all) @<:@default=no@:>@.])],
+    [AS_HELP_STRING([--enable-ncp-app],[Enable NCP support (no|mtd|ftd|radio|all) @<:@default=no@:>@.])],
     [
         # Map all & both to yes
         case "${enableval}" in
-        all|both)
+        all)
             enableval=yes
             ;;
 
@@ -444,18 +497,28 @@ AC_ARG_ENABLE(ncp-app,
             enable_ncp_app=${enableval}
             enable_ncp_app_mtd=${enableval}
             enable_ncp_app_ftd=${enableval}
+            enable_ncp_app_radio=${enableval}
             ;;
 
         mtd)
             enable_ncp_app=yes
             enable_ncp_app_mtd=yes
             enable_ncp_app_ftd=no
+            enable_ncp_app_radio=no
             ;;
 
         ftd)
             enable_ncp_app=yes
             enable_ncp_app_mtd=no
             enable_ncp_app_ftd=yes
+            enable_ncp_app_radio=no
+            ;;
+
+        radio)
+            enable_ncp_app=yes
+            enable_ncp_app_mtd=no
+            enable_ncp_app_ftd=no
+            enable_ncp_app_radio=yes
             ;;
 
         *)
@@ -467,6 +530,7 @@ AC_ARG_ENABLE(ncp-app,
      enable_ncp_app=no
      enable_ncp_app_ftd=no
      enable_ncp_app_mtd=no
+     enable_ncp_app_radio=no
     ]
     )
 
@@ -477,14 +541,18 @@ AC_MSG_CHECKING([should NCP support ftd])
 AC_MSG_RESULT(${enable_ncp_app_ftd})
 AC_MSG_CHECKING([should NCP support mtd])
 AC_MSG_RESULT(${enable_ncp_app_mtd})
+AC_MSG_CHECKING([should NCP support radio-only])
+AC_MSG_RESULT(${enable_ncp_app_radio})
 
 AC_SUBST(OPENTHREAD_ENABLE_NCP)
 AC_SUBST(OPENTHREAD_ENABLE_NCP_MTD)
 AC_SUBST(OPENTHREAD_ENABLE_NCP_FTD)
+AC_SUBST(OPENTHREAD_ENABLE_NCP_RADIO)
 
-AM_CONDITIONAL([OPENTHREAD_ENABLE_NCP],      [test "${enable_ncp_app}" == "yes"])
-AM_CONDITIONAL([OPENTHREAD_ENABLE_NCP_MTD],  [test "${enable_ncp_app_mtd}" == "yes"])
-AM_CONDITIONAL([OPENTHREAD_ENABLE_NCP_FTD],  [test "${enable_ncp_app_ftd}" == "yes"])
+AM_CONDITIONAL([OPENTHREAD_ENABLE_NCP],         [test "${enable_ncp_app}" == "yes" -o "${OPENTHREAD_ENABLE_POSIX_APP_NCP}" == "1"])
+AM_CONDITIONAL([OPENTHREAD_ENABLE_NCP_MTD],     [test "${enable_ncp_app_mtd}" == "yes"])
+AM_CONDITIONAL([OPENTHREAD_ENABLE_NCP_FTD],     [test "${enable_ncp_app_ftd}" == "yes" -o "${OPENTHREAD_ENABLE_POSIX_APP_NCP}" == "1"])
+AM_CONDITIONAL([OPENTHREAD_ENABLE_NCP_RADIO],   [test "${enable_ncp_app_radio}" == "yes"])
 
 #
 # NCP BUS - how does the NCP talk to the host?
@@ -526,7 +594,7 @@ AC_MSG_RESULT([${OPENTHREAD_ENABLE_SPI}])
 AC_SUBST(OPENTHREAD_ENABLE_NCP_UART)
 AM_CONDITIONAL([OPENTHREAD_ENABLE_NCP_UART], [test "${with_ncp_bus}"  = "uart"])
 AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_NCP_UART],[${OPENTHREAD_ENABLE_NCP_UART}],[Define to 1 to enable the NCP UART interface.])
-AC_MSG_CHECKING([sould NCP support UART])
+AC_MSG_CHECKING([should NCP support UART])
 AC_MSG_RESULT([${OPENTHREAD_ENABLE_UART}])
 
 #
@@ -582,8 +650,8 @@ AC_ARG_ENABLE(builtin-mbedtls,
 
 if test "$enable_builtin_mbedtls" = "yes" -a ! "${MBEDTLS_CPPFLAGS}"; then
     MBEDTLS_CPPFLAGS="-I\${abs_top_srcdir}/third_party/mbedtls"
-    MBEDTLS_CPPFLAGS="${MBEDTLS_CPPFLAGS} -I\${abs_top_srcdir}/third_party/mbedtls/repo.patched/include"
-    MBEDTLS_CPPFLAGS="${MBEDTLS_CPPFLAGS} -I\${abs_top_srcdir}/third_party/mbedtls/repo.patched/include/mbedtls"
+    MBEDTLS_CPPFLAGS="${MBEDTLS_CPPFLAGS} -I\${abs_top_srcdir}/third_party/mbedtls/repo/include"
+    MBEDTLS_CPPFLAGS="${MBEDTLS_CPPFLAGS} -I\${abs_top_srcdir}/third_party/mbedtls/repo/include/mbedtls"
     MBEDTLS_CPPFLAGS="${MBEDTLS_CPPFLAGS} -DMBEDTLS_CONFIG_FILE=\\\"mbedtls-config.h\\\""
 fi
 AC_MSG_CHECKING([whether mbed TLS should be enabled])
@@ -1284,8 +1352,12 @@ AC_ARG_WITH(examples,
         [Specify the examples from one of: none, posix, cc2538, cc2650, cc2652, da15000, efr32, emsk, gp712, kw41z, nrf52840, samr21 @<:@default=none@:>@.])],
     [
         case "${with_examples}" in
-
-        none|posix|cc2538|cc2650|cc2652|da15000|efr32|emsk|gp712|kw41z|nrf52840|samr21)
+        none)
+            ;;
+        posix|cc2538|cc2650|cc2652|da15000|efr32|emsk|gp712|kw41z|nrf52840|samr21)
+            if test ${enable_posix_app} = "yes"; then
+                AC_MSG_ERROR([--with-examples must be none when POSIX apps are enabled by --enable-posix-app])
+            fi
             ;;
         *)
             AC_MSG_ERROR([Invalid value ${with_examples} for --with-examples])
@@ -1431,6 +1503,8 @@ NL_ENABLE_DOCS([auto],[NO])
 
 AM_CONDITIONAL(OPENTHREAD_BUILD_DOCS, [test "${nl_cv_build_docs}" = "yes"])
 
+AM_CONDITIONAL(OPENTHREAD_POSIX, [test "${OPENTHREAD_ENABLE_POSIX_APP}" = "1" -o "${OPENTHREAD_EXAMPLES_POSIX}" = "1"])
+
 #
 # Checks for libraries and packages.
 #
@@ -1505,7 +1579,7 @@ CPPFLAGS="${CPPFLAGS} ${MBEDTLS_CPPFLAGS}"
 # Add any code coverage CPPFLAGS and LDFLAGS
 
 CPPFLAGS="${CPPFLAGS} ${NL_COVERAGE_CPPFLAGS}"
-LDFLAGS="${LDFLAGS} ${NL_COVERAGE_LDFLAGS}"
+LIBS="${LIBS} ${NL_COVERAGE_LIBS}"
 
 # At this point, we can restore the compiler flags to whatever the
 # user passed in, now that we're clear of an -Werror issues by
@@ -1526,6 +1600,8 @@ src/cli/Makefile
 src/ncp/Makefile
 src/core/Makefile
 src/diag/Makefile
+src/posix/Makefile
+src/posix/platform/Makefile
 third_party/Makefile
 third_party/mbedtls/Makefile
 examples/Makefile

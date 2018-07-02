@@ -31,6 +31,7 @@ include $(abs_top_nlbuild_autotools_dir)/automake/pre.am
 lib_LIBRARIES                       = \
     libopenthread-ftd.a               \
     libopenthread-mtd.a               \
+    libopenthread-radio.a             \
     $(NULL)
 
 CPPFLAGS_COMMON                     = \
@@ -38,6 +39,10 @@ CPPFLAGS_COMMON                     = \
     $(OPENTHREAD_TARGET_DEFINES)      \
     $(NULL)
 
+libopenthread_radio_a_CPPFLAGS      = \
+    $(CPPFLAGS_COMMON)                \
+    -DOPENTHREAD_RADIO=1              \
+    $(NULL)
 
 libopenthread_ftd_a_CPPFLAGS        = \
     $(CPPFLAGS_COMMON)                \
@@ -49,7 +54,7 @@ libopenthread_mtd_a_CPPFLAGS        = \
     -DOPENTHREAD_MTD=1                \
     $(NULL)
 
-#----------------------------------------
+#------------------------------------------------------
 # Note to maintainer/developers about "SOURCES_COMMON"
 #
 # The traditional method for GNU style Makefile.am files
@@ -84,17 +89,18 @@ libopenthread_mtd_a_CPPFLAGS        = \
 #     configurations require appropriate wrappers
 #     Such as #if/#else/#endif
 #
-#     The net result is sort of an "empty translation unit"
+#     The net result is sort of an "empty translation
+#     unit"
 #
 
 SOURCES_COMMON                      = \
-    api/coap_api.cpp                  \
-    api/commissioner_api.cpp          \
+    api/border_router_api.cpp         \
     api/channel_manager_api.cpp       \
     api/channel_monitor_api.cpp       \
     api/child_supervision_api.cpp     \
+    api/coap_api.cpp                  \
+    api/commissioner_api.cpp          \
     api/crypto_api.cpp                \
-    api/border_router_api.cpp         \
     api/dataset_api.cpp               \
     api/dataset_ftd_api.cpp           \
     api/dhcp6_api.cpp                 \
@@ -108,6 +114,7 @@ SOURCES_COMMON                      = \
     api/link_raw_api.cpp              \
     api/message_api.cpp               \
     api/netdata_api.cpp               \
+    api/network_time_api.cpp          \
     api/server_api.cpp                \
     api/tasklet_api.cpp               \
     api/thread_api.cpp                \
@@ -119,17 +126,18 @@ SOURCES_COMMON                      = \
     coap/coap_secure.cpp              \
     common/crc16.cpp                  \
     common/instance.cpp               \
-    common/logging.cpp                \
     common/locator.cpp                \
-    common/notifier.cpp               \
+    common/logging.cpp                \
     common/message.cpp                \
+    common/notifier.cpp               \
+    common/settings.cpp               \
+    common/string.cpp                 \
     common/tasklet.cpp                \
     common/timer.cpp                  \
     common/tlvs.cpp                   \
     common/trickle_timer.cpp          \
     crypto/aes_ccm.cpp                \
     crypto/aes_ecb.cpp                \
-    crypto/heap.cpp                   \
     crypto/hmac_sha256.cpp            \
     crypto/mbedtls.cpp                \
     crypto/pbkdf2_cmac.cpp            \
@@ -166,6 +174,8 @@ SOURCES_COMMON                      = \
     net/udp6.cpp                      \
     thread/address_resolver.cpp       \
     thread/announce_begin_server.cpp  \
+    thread/announce_sender.cpp        \
+    thread/child_table.cpp            \
     thread/data_poll_manager.cpp      \
     thread/energy_scan_server.cpp     \
     thread/key_manager.cpp            \
@@ -182,20 +192,38 @@ SOURCES_COMMON                      = \
     thread/network_data_local.cpp     \
     thread/network_diagnostic.cpp     \
     thread/panid_query_server.cpp     \
+    thread/router_table.cpp           \
     thread/src_match_controller.cpp   \
     thread/thread_netif.cpp           \
     thread/tmf_proxy.cpp              \
+    thread/time_sync_service.cpp      \
     thread/topology.cpp               \
     utils/channel_manager.cpp         \
     utils/channel_monitor.cpp         \
     utils/child_supervision.cpp       \
+    utils/heap.cpp                    \
     utils/jam_detector.cpp            \
-    utils/missing_strlcpy.c           \
     utils/missing_strlcat.c           \
+    utils/missing_strlcpy.c           \
     utils/missing_strnlen.c           \
     utils/slaac_address.cpp           \
     $(NULL)
 
+libopenthread_radio_a_SOURCES       = \
+    api/instance_api.cpp              \
+    api/link_raw_api.cpp              \
+    api/message_api.cpp               \
+    api/tasklet_api.cpp               \
+    common/instance.cpp               \
+    common/locator.cpp                \
+    common/logging.cpp                \
+    common/message.cpp                \
+    common/string.cpp                 \
+    common/tasklet.cpp                \
+    common/timer.cpp                  \
+    mac/mac_frame.cpp                 \
+    thread/link_quality.cpp           \
+    $(NULL)
 
 libopenthread_mtd_a_SOURCES         = \
     $(SOURCES_COMMON)                 \
@@ -220,18 +248,18 @@ HEADERS_COMMON                      = \
     common/locator.hpp                \
     common/logging.hpp                \
     common/message.hpp                \
+    common/new.hpp                    \
     common/notifier.hpp               \
     common/owner-locator.hpp          \
     common/random.hpp                 \
     common/settings.hpp               \
-    common/new.hpp                    \
+    common/string.hpp                 \
     common/tasklet.hpp                \
     common/timer.hpp                  \
     common/tlvs.hpp                   \
     common/trickle_timer.hpp          \
     crypto/aes_ccm.hpp                \
     crypto/aes_ecb.hpp                \
-    crypto/heap.hpp                   \
     crypto/hmac_sha256.hpp            \
     crypto/mbedtls.hpp                \
     crypto/pbkdf2_cmac.h              \
@@ -261,8 +289,8 @@ HEADERS_COMMON                      = \
     net/icmp6.hpp                     \
     net/ip6.hpp                       \
     net/ip6_address.hpp               \
-    net/ip6_headers.hpp               \
     net/ip6_filter.hpp                \
+    net/ip6_headers.hpp               \
     net/ip6_mpl.hpp                   \
     net/ip6_routes.hpp                \
     net/netif.hpp                     \
@@ -271,6 +299,8 @@ HEADERS_COMMON                      = \
     net/udp6.hpp                      \
     thread/address_resolver.hpp       \
     thread/announce_begin_server.hpp  \
+    thread/announce_sender.hpp        \
+    thread/child_table.hpp            \
     thread/data_poll_manager.hpp      \
     thread/energy_scan_server.hpp     \
     thread/key_manager.hpp            \
@@ -289,20 +319,23 @@ HEADERS_COMMON                      = \
     thread/network_data_leader_mtd.hpp \
     thread/network_data_local.hpp     \
     thread/network_data_tlvs.hpp      \
-    thread/panid_query_server.hpp     \
     thread/network_diagnostic.hpp     \
     thread/network_diagnostic_tlvs.hpp \
+    thread/panid_query_server.hpp     \
+    thread/router_table.hpp           \
     thread/src_match_controller.hpp   \
     thread/thread_netif.hpp           \
     thread/thread_tlvs.hpp            \
     thread/thread_uri_paths.hpp       \
     thread/tmf_proxy.hpp              \
+    thread/time_sync_service.hpp      \
     thread/topology.hpp               \
     utils/channel_manager.hpp         \
     utils/channel_monitor.hpp         \
     utils/child_supervision.hpp       \
-    utils/slaac_address.hpp           \
+    utils/heap.hpp                    \
     utils/jam_detector.hpp            \
+    utils/slaac_address.hpp           \
     utils/wrap_stdbool.h              \
     utils/wrap_stdint.h               \
     utils/wrap_string.h               \
@@ -313,8 +346,8 @@ noinst_HEADERS                      = \
     $(NULL)
 
 PRETTY_FILES                        = \
-    $(SOURCES_COMMON)                 \
     $(HEADERS_COMMON)                 \
+    $(SOURCES_COMMON)                 \
     $(NULL)
 
 if OPENTHREAD_BUILD_COVERAGE
