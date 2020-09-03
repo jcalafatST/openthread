@@ -37,10 +37,10 @@
 #include "openthread-core-config.h"
 
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
-#include "utils/wrap_string.h"
 
-#include <openthread/types.h>
+#include <openthread/error.h>
 
 #include "common/code_utils.hpp"
 
@@ -55,6 +55,18 @@ namespace ot {
  * @{
  *
  */
+
+/**
+ * This function returns the number of characters that precede the terminating nullptr character.
+ *
+ * @param[in] aString      A pointer to the string.
+ * @param[in] aMaxLength   The maximum length in bytes.
+ *
+ * @returns The number of characters that precede the terminating nullptr character or @p aMaxLength, whichever is
+ * smaller.
+ *
+ */
+uint16_t StringLength(const char *aString, uint16_t aMaxLength);
 
 /**
  * This class defines the base class for `String`.
@@ -108,12 +120,12 @@ public:
      * @param[in] ...        Arguments for the format specification.
      *
      */
-    String(const char *aFormat, ...)
+    explicit String(const char *aFormat, ...)
         : mLength(0)
     {
         va_list args;
         va_start(args, aFormat);
-        Write(mBuffer, kSize, mLength, aFormat, args);
+        IgnoreError(Write(mBuffer, kSize, mLength, aFormat, args));
         va_end(args);
     }
 
@@ -197,6 +209,29 @@ public:
         error = Write(mBuffer, kSize, mLength, aFormat, args);
         va_end(args);
 
+        return error;
+    }
+
+    /**
+     * This method appends an array of bytes in hex representation (using "%02x" style) to the `String` object.
+     *
+     * @param[in] aBytes    A pointer to buffer containing the bytes to append.
+     * @param[in] aLength   The length of @p aBytes buffer (in bytes).
+     *
+     * @retval OT_ERROR_NONE           Updated the string successfully.
+     * @retval OT_ERROR_NO_BUFS        String could not fit in the storage.
+     *
+     */
+    otError AppendHexBytes(const uint8_t *aBytes, uint16_t aLength)
+    {
+        otError error = OT_ERROR_NONE;
+
+        while (aLength--)
+        {
+            SuccessOrExit(error = Append("%02x", *aBytes++));
+        }
+
+    exit:
         return error;
     }
 

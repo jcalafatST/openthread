@@ -46,7 +46,7 @@ TrickleTimer::TrickleTimer(Instance &aInstance,
                            Handler aTransmitHandler,
                            Handler aIntervalExpiredHandler,
                            void *  aOwner)
-    : TimerMilli(aInstance, &TrickleTimer::HandleTimer, aOwner)
+    : TimerMilli(aInstance, TrickleTimer::HandleTimer, aOwner)
 #ifdef ENABLE_TRICKLE_TIMER_SUPPRESSION_SUPPORT
     , mRedundancyConstant(aRedundancyConstant)
     , mCounter(0)
@@ -61,15 +61,13 @@ TrickleTimer::TrickleTimer(Instance &aInstance,
     , mIsRunning(false)
     , mInTransmitPhase(false)
 {
-    assert(aTransmitHandler != NULL);
+    OT_ASSERT(aTransmitHandler != nullptr);
 }
 
-otError TrickleTimer::Start(uint32_t aIntervalMin, uint32_t aIntervalMax, Mode aMode)
+void TrickleTimer::Start(uint32_t aIntervalMin, uint32_t aIntervalMax, Mode aMode)
 {
-    otError error = OT_ERROR_NONE;
-
-    VerifyOrExit(aIntervalMax >= aIntervalMin, error = OT_ERROR_INVALID_ARGS);
-    VerifyOrExit(aIntervalMin != 0 || aIntervalMax != 0, error = OT_ERROR_INVALID_ARGS);
+    OT_ASSERT(aIntervalMax >= aIntervalMin);
+    OT_ASSERT(aIntervalMin != 0 || aIntervalMax != 0);
 
     mIntervalMin = aIntervalMin;
     mIntervalMax = aIntervalMax;
@@ -77,12 +75,9 @@ otError TrickleTimer::Start(uint32_t aIntervalMin, uint32_t aIntervalMax, Mode a
     mIsRunning   = true;
 
     // Select interval randomly from range [Imin, Imax].
-    mInterval = Random::GetUint32InRange(mIntervalMin, mIntervalMax + 1);
+    mInterval = Random::NonCrypto::GetUint32InRange(mIntervalMin, mIntervalMax + 1);
 
     StartNewInterval();
-
-exit:
-    return error;
 }
 
 void TrickleTimer::Stop(void)
@@ -95,7 +90,7 @@ void TrickleTimer::IndicateInconsistent(void)
 {
     // If interval is equal to minimum when an "inconsistent" event
     // is received, do nothing.
-    VerifyOrExit(mIsRunning && (mInterval != mIntervalMin));
+    VerifyOrExit(mIsRunning && (mInterval != mIntervalMin), OT_NOOP);
 
     mInterval = mIntervalMin;
     StartNewInterval();
@@ -121,7 +116,7 @@ void TrickleTimer::StartNewInterval(void)
         VerifyOrExit(halfInterval < mInterval, mTimeInInterval = halfInterval);
 
         // Select a random point in the interval taken from the range [I/2, I).
-        mTimeInInterval = Random::GetUint32InRange(halfInterval, mInterval);
+        mTimeInInterval = Random::NonCrypto::GetUint32InRange(halfInterval, mInterval);
         break;
 
     case kModePlainTimer:
@@ -130,7 +125,7 @@ void TrickleTimer::StartNewInterval(void)
 
     case kModeMPL:
         // Select a random point in interval taken from the range [0, I].
-        mTimeInInterval = Random::GetUint32InRange(0, mInterval + 1);
+        mTimeInInterval = Random::NonCrypto::GetUint32InRange(0, mInterval + 1);
         break;
     }
 
@@ -171,7 +166,7 @@ void TrickleTimer::HandleEndOfTimeInInterval(void)
     {
     case kModePlainTimer:
         // Select a random interval in [Imin, Imax] and restart.
-        mInterval = Random::GetUint32InRange(mIntervalMin, mIntervalMax + 1);
+        mInterval = Random::NonCrypto::GetUint32InRange(mIntervalMin, mIntervalMax + 1);
         StartNewInterval();
         break;
 

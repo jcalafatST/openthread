@@ -36,8 +36,6 @@
 
 #include "openthread-core-config.h"
 
-#include <openthread/types.h>
-
 #include "coap/coap.hpp"
 #include "common/locator.hpp"
 #include "common/timer.hpp"
@@ -60,16 +58,6 @@ public:
     explicit AnnounceBeginServer(Instance &aInstance);
 
     /**
-     * This method begins the MLE Announce transmission process using Count=3 and Period=1s.
-     *
-     * @param[in]  aChannelMask   The channels to use for transmission.
-     *
-     * @retval OT_ERROR_NONE  Successfully started the transmission process.
-     *
-     */
-    otError SendAnnounce(uint32_t aChannelMask);
-
-    /**
      * This method begins the MLE Announce transmission process.
      *
      * @param[in]  aChannelMask   The channels to use for transmission.
@@ -79,7 +67,7 @@ public:
      * @retval OT_ERROR_NONE  Successfully started the transmission process.
      *
      */
-    otError SendAnnounce(uint32_t aChannelMask, uint8_t aCount, uint16_t aPeriod);
+    void SendAnnounce(uint32_t aChannelMask, uint8_t aCount = kDefaultCount, uint16_t aPeriod = kDefaultPeriod);
 
 private:
     enum
@@ -89,11 +77,8 @@ private:
         kDefaultJitter = 0,
     };
 
-    static void HandleRequest(void *               aContext,
-                              otCoapHeader *       aHeader,
-                              otMessage *          aMessage,
-                              const otMessageInfo *aMessageInfo);
-    void        HandleRequest(Coap::Header &aHeader, Message &aMessage, const Ip6::MessageInfo &aMessageInfo);
+    static void HandleRequest(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo);
+    void        HandleRequest(Coap::Message &aMessage, const Ip6::MessageInfo &aMessageInfo);
 
     static void HandleTimer(Timer &aTimer);
 

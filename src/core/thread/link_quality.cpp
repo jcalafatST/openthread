@@ -37,7 +37,7 @@
 
 #include "common/code_utils.hpp"
 #include "common/instance.hpp"
-#include "utils/wrap_string.h"
+#include "common/locator-getters.hpp"
 
 namespace ot {
 
@@ -133,18 +133,11 @@ RssAverager::InfoString RssAverager::ToString(void) const
 {
     InfoString string;
 
-    VerifyOrExit(mCount != 0);
-    string.Set("%d.%s", -(mAverage >> kPrecisionBitShift), kDigitsString[mAverage & kPrecisionBitMask]);
+    VerifyOrExit(mCount != 0, OT_NOOP);
+    IgnoreError(string.Set("%d.%s", -(mAverage >> kPrecisionBitShift), kDigitsString[mAverage & kPrecisionBitMask]));
 
 exit:
     return string;
-}
-
-LinkQualityInfo::LinkQualityInfo(void)
-    : mLastRss(OT_RADIO_RSSI_INVALID)
-{
-    mRssAverager.Reset();
-    SetLinkQuality(0);
 }
 
 void LinkQualityInfo::Clear(void)
@@ -152,13 +145,16 @@ void LinkQualityInfo::Clear(void)
     mRssAverager.Reset();
     SetLinkQuality(0);
     mLastRss = OT_RADIO_RSSI_INVALID;
+
+    mFrameErrorRate.Reset();
+    mMessageErrorRate.Reset();
 }
 
-void LinkQualityInfo::AddRss(int8_t aNoiseFloor, int8_t aRss)
+void LinkQualityInfo::AddRss(int8_t aRss)
 {
     uint8_t oldLinkQuality = kNoLinkQuality;
 
-    VerifyOrExit(aRss != OT_RADIO_RSSI_INVALID);
+    VerifyOrExit(aRss != OT_RADIO_RSSI_INVALID, OT_NOOP);
 
     mLastRss = aRss;
 
@@ -169,10 +165,15 @@ void LinkQualityInfo::AddRss(int8_t aNoiseFloor, int8_t aRss)
 
     SuccessOrExit(mRssAverager.Add(aRss));
 
-    SetLinkQuality(CalculateLinkQuality(GetLinkMargin(aNoiseFloor), oldLinkQuality));
+    SetLinkQuality(CalculateLinkQuality(GetLinkMargin(), oldLinkQuality));
 
 exit:
     return;
+}
+
+uint8_t LinkQualityInfo::GetLinkMargin(void) const
+{
+    return ConvertRssToLinkMargin(Get<Mac::SubMac>().GetNoiseFloor(), GetAverageRss());
 }
 
 LinkQualityInfo::InfoString LinkQualityInfo::ToInfoString(void) const

@@ -29,7 +29,6 @@
 #include "test_platform.h"
 
 #include <openthread/config.h>
-#include <openthread/openthread.h>
 
 #include "test_util.h"
 #include "common/code_utils.hpp"
@@ -42,15 +41,14 @@ enum
     kStringSize = 10,
 };
 
-template <uint16_t kSize>
-void PrintString(const char *aName, const String<kSize> aString)
+template <uint16_t kSize> void PrintString(const char *aName, const String<kSize> aString)
 {
     printf("\t%s = [%d] \"%s\"\n", aName, aString.GetLength(), aString.AsCString());
 }
 
 void TestString(void)
 {
-    otError error;
+    otError             error;
     String<kStringSize> str1;
     String<kStringSize> str2("abc");
     String<kStringSize> str3("%d", 12);
@@ -85,7 +83,7 @@ void TestString(void)
     VerifyOrQuit(str1.GetLength() == 0, "GetLength() failed for empty string");
     VerifyOrQuit(strcmp(str1.AsCString(), "") == 0, "String content is incorrect");
 
-    str1.Set("%d", 12);
+    IgnoreError(str1.Set("%d", 12));
     VerifyOrQuit(str1.GetLength() == 2, "GetLength() failed");
     VerifyOrQuit(strcmp(str1.AsCString(), "12") == 0, "String content is incorrect");
     PrintString("str1", str1);
@@ -119,13 +117,34 @@ void TestString(void)
     printf(" -- PASS\n");
 }
 
+void TestStringLength(void)
+{
+    char string_a[5] = "\0foo";
+    char string_b[8] = "foo\0bar";
+
+    printf("\nTest 4: String::StringLength() method\n");
+
+    VerifyOrQuit(StringLength(string_a, 0) == 0, "StringLength() 0len 0 fails");
+    VerifyOrQuit(StringLength(string_a, 1) == 0, "StringLength() 0len 1 fails");
+    VerifyOrQuit(StringLength(string_a, 2) == 0, "StringLength() 0len 2 fails");
+
+    VerifyOrQuit(StringLength(string_b, 0) == 0, "StringLength() 3len 0 fails");
+    VerifyOrQuit(StringLength(string_b, 1) == 1, "StringLength() 3len 1 fails");
+    VerifyOrQuit(StringLength(string_b, 2) == 2, "StringLength() 3len 2 fails");
+    VerifyOrQuit(StringLength(string_b, 3) == 3, "StringLength() 3len 3 fails");
+    VerifyOrQuit(StringLength(string_b, 4) == 3, "StringLength() 3len 4 fails");
+    VerifyOrQuit(StringLength(string_b, 5) == 3, "StringLength() 3len 5 fails");
+    VerifyOrQuit(StringLength(string_b, 6) == 3, "StringLength() 3len 6 fails");
+
+    printf(" -- PASS\n");
+}
+
 } // namespace ot
 
-#ifdef ENABLE_TEST_MAIN
 int main(void)
 {
     ot::TestString();
+    ot::TestStringLength();
     printf("\nAll tests passed.\n");
     return 0;
 }
-#endif

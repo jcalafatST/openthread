@@ -26,16 +26,15 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <openthread/openthread.h>
-
 #include "common/code_utils.hpp"
 #include "thread/link_quality.hpp"
-#include "utils/wrap_string.h"
 
 #include "test_platform.h"
 #include "test_util.h"
 
 namespace ot {
+
+static ot::Instance *sInstance;
 
 enum
 {
@@ -92,7 +91,12 @@ void TestLinkQualityData(RssTestData aRssData)
     int8_t          rss, ave, min, max;
     size_t          i;
 
+    sInstance = testInitInstance();
+    VerifyOrQuit(sInstance != nullptr, "Null instance");
+    linkInfo.Init(*sInstance);
+
     printf("- - - - - - - - - - - - - - - - - -\n");
+    linkInfo.Clear();
     min = kMinRssValue;
     max = kMaxRssValue;
 
@@ -101,7 +105,7 @@ void TestLinkQualityData(RssTestData aRssData)
         rss = aRssData.mRssList[i];
         min = MIN_RSS(rss, min);
         max = MAX_RSS(rss, max);
-        linkInfo.AddRss(sNoiseFloor, rss);
+        linkInfo.AddRss(rss);
         VerifyOrQuit(linkInfo.GetLastRss() == rss, "TestLinkQualityInfo failed - GetLastRss() is incorrect");
         ave = linkInfo.GetAverageRss();
         VerifyOrQuit(ave >= min, "TestLinkQualityInfo failed - GetAverageRss() is smaller than min value.");
@@ -142,8 +146,8 @@ int8_t GetRandomRss(void)
 {
     uint32_t value;
 
-    value = otPlatRandomGet() % 128;
-    return static_cast<int8_t>(-value);
+    value = rand() % 128;
+    return -static_cast<int8_t>(value);
 }
 
 void TestRssAveraging(void)
@@ -170,7 +174,7 @@ void TestRssAveraging(void)
     // Adding a single value
     rss = -70;
     printf("AddRss(%d): ", rss);
-    rssAverager.Add(rss);
+    IgnoreError(rssAverager.Add(rss));
     VerifyOrQuit(rssAverager.GetAverage() == rss, "TestLinkQualityInfo - GetAverage() failed after a single AddRss().");
     VerifyRawRssValue(rssAverager);
     PrintOutcome(rssAverager);
@@ -198,7 +202,7 @@ void TestRssAveraging(void)
 
         for (i = 0; i < kNumRssAdds; i++)
         {
-            rssAverager.Add(rss);
+            IgnoreError(rssAverager.Add(rss));
             VerifyOrQuit(rssAverager.GetAverage() == rss,
                          "TestLinkQualityInfo failed - GetAverage() returned incorrect value.");
             VerifyRawRssValue(rssAverager);
@@ -225,8 +229,8 @@ void TestRssAveraging(void)
 
             rss2 = rssValues[k];
             rssAverager.Reset();
-            rssAverager.Add(rss);
-            rssAverager.Add(rss2);
+            IgnoreError(rssAverager.Add(rss));
+            IgnoreError(rssAverager.Add(rss2));
             printf("AddRss(%4d), AddRss(%4d): ", rss, rss2);
             VerifyOrQuit(rssAverager.GetAverage() == ((rss + rss2) >> 1),
                          "TestLinkQualityInfo failed - GetAverage() returned incorrect value.");
@@ -256,10 +260,10 @@ void TestRssAveraging(void)
 
             for (i = 0; i < kNumRssAdds; i++)
             {
-                rssAverager.Add(rss);
+                IgnoreError(rssAverager.Add(rss));
             }
 
-            rssAverager.Add(rss2);
+            IgnoreError(rssAverager.Add(rss2));
             printf("AddRss(%4d) %d times, AddRss(%4d): ", rss, kNumRssAdds, rss2);
             ave = rssAverager.GetAverage();
             VerifyOrQuit(ave >= MIN_RSS(rss, rss2),
@@ -292,8 +296,8 @@ void TestRssAveraging(void)
 
             for (i = 0; i < kNumRssAdds; i++)
             {
-                rssAverager.Add(rss);
-                rssAverager.Add(rss2);
+                IgnoreError(rssAverager.Add(rss));
+                IgnoreError(rssAverager.Add(rss2));
                 ave = rssAverager.GetAverage();
                 VerifyOrQuit(ave >= MIN_RSS(rss, rss2),
                              "TestLinkQualityInfo failed - GetAverage() is smaller than min value.");
@@ -327,7 +331,7 @@ void TestRssAveraging(void)
         for (j = 1; j <= 8; j++)
         {
             rss = GetRandomRss();
-            rssAverager.Add(rss);
+            IgnoreError(rssAverager.Add(rss));
             sum += rss;
             mean = static_cast<double>(sum) / j;
             VerifyOrQuit(ABS(rssAverager.GetAverage() - mean) < 1, "Average does not match the arithmetic mean!");
@@ -386,6 +390,8 @@ void TestSuccessRateTracker(void)
     const uint16_t kWeightLimit[] = {64, 128, 256, 300, 512, 810, 900};
 
     printf("\nTesting SuccessRateTracker\n");
+
+    rateTracker.Reset();
 
     VerifyOrQuit(rateTracker.GetSuccessRate() == kMaxRate, "SuccessRateTracker: Initial value incorrect");
     VerifyOrQuit(rateTracker.GetFailureRate() == 0, "SuccessRateTracker: Initial value incorrect");
@@ -485,7 +491,6 @@ void TestSuccessRateTracker(void)
 
 } // namespace ot
 
-#ifdef ENABLE_TEST_MAIN
 int main(void)
 {
     ot::TestRssAveraging();
@@ -494,4 +499,3 @@ int main(void)
     printf("\nAll tests passed\n");
     return 0;
 }
-#endif

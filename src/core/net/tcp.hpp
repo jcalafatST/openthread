@@ -36,12 +36,11 @@
 
 #include "openthread-core-config.h"
 
-#include <openthread/openthread.h>
-
 #include "net/ip6_headers.hpp"
 
 namespace ot {
 namespace Ip6 {
+namespace Tcp {
 
 /**
  * @addtogroup core-tcp
@@ -53,25 +52,12 @@ namespace Ip6 {
  *
  */
 
-OT_TOOL_PACKED_BEGIN
-struct TcpHeaderPoD
-{
-    uint16_t mSource;
-    uint16_t mDestination;
-    uint32_t mSequenceNumber;
-    uint32_t mAckNumber;
-    uint16_t mFlags;
-    uint16_t mWindow;
-    uint16_t mChecksum;
-    uint16_t mUrgentPointer;
-} OT_TOOL_PACKED_END;
-
 /**
  * This class implements TCP header parsing.
  *
  */
 OT_TOOL_PACKED_BEGIN
-class TcpHeader : private TcpHeaderPoD
+class Header
 {
 public:
     /**
@@ -138,6 +124,16 @@ public:
      */
     uint16_t GetUrgentPointer(void) const { return HostSwap16(mUrgentPointer); }
 
+private:
+    uint16_t mSource;
+    uint16_t mDestination;
+    uint32_t mSequenceNumber;
+    uint32_t mAckNumber;
+    uint16_t mFlags;
+    uint16_t mWindow;
+    uint16_t mChecksum;
+    uint16_t mUrgentPointer;
+
 } OT_TOOL_PACKED_END;
 
 /**
@@ -145,6 +141,7 @@ public:
  *
  */
 
+} // namespace Tcp
 } // namespace Ip6
 } // namespace ot
 

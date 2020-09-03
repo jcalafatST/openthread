@@ -40,26 +40,30 @@ SUBDIRS                                                                = \
     platform                                                             \
     $(NULL)
 
-# Always pretty (e.g. for 'make pretty') these subdirectories.
-
-PRETTY_SUBDIRS                                                         = \
-    platform                                                             \
-    $(NULL)
-
 CPPFLAGS_COMMON                                                        = \
     -I$(top_srcdir)/include                                              \
+    -I$(top_srcdir)/src/                                                 \
     -I$(top_srcdir)/src/core                                             \
     -I$(top_srcdir)/src/posix/platform                                   \
+    -I$(top_srcdir)/src/posix/platform/include                           \
     -D_GNU_SOURCE                                                        \
+    -DOPENTHREAD_FTD=1                                                   \
+    -DOPENTHREAD_MTD=0                                                   \
+    -DOPENTHREAD_RADIO=0                                                 \
     $(NULL)
 
 LIBTOOLFLAGS_COMMON = --preserve-dup-deps
 
 LDADD_COMMON                                                           = \
     $(top_builddir)/src/posix/platform/libopenthread-posix.a             \
-    -lstdc++                                                             \
     -lutil                                                               \
     $(NULL)
+
+if OPENTHREAD_TARGET_LINUX
+LDADD_COMMON                                                          += \
+    -lrt                                                                 \
+    $(NULL)
+endif
 
 if OPENTHREAD_ENABLE_BUILTIN_MBEDTLS
 LDADD_COMMON                                                          += \
@@ -67,24 +71,13 @@ LDADD_COMMON                                                          += \
     $(NULL)
 endif # OPENTHREAD_ENABLE_BUILTIN_MBEDTLS
 
-if OPENTHREAD_ENABLE_DIAG
-LDADD_COMMON                                                          += \
-    $(top_builddir)/src/diag/libopenthread-diag.a                        \
-    $(NULL)
-endif # OPENTHREAD_ENABLE_DIAG
-
 bin_PROGRAMS                                                           = \
     $(NULL)
 
-if OPENTHREAD_ENABLE_POSIX_APP_NCP
-bin_PROGRAMS                                                          += \
-    ot-ncp                                                               \
-    $(NULL)
-endif
-
+if OPENTHREAD_ENABLE_EXECUTABLE
 ot_ncp_CPPFLAGS                                                        = \
     $(CPPFLAGS_COMMON)                                                   \
-    -DOPENTHREAD_POSIX_APP=1                                             \
+    -DOPENTHREAD_POSIX_APP_TYPE=OT_POSIX_APP_TYPE_NCP                    \
     $(NULL)
 
 ot_ncp_SOURCES                                                         = \
@@ -95,6 +88,7 @@ ot_ncp_LDADD                                                           = \
     $(top_builddir)/src/ncp/libopenthread-ncp-ftd.a                      \
     $(top_builddir)/src/core/libopenthread-ftd.a                         \
     $(LDADD_COMMON)                                                      \
+    $(top_builddir)/src/ncp/libopenthread-ncp-ftd.a                      \
     $(top_builddir)/src/core/libopenthread-ftd.a                         \
     $(LDADD_COMMON)                                                      \
     $(NULL)
@@ -107,25 +101,77 @@ ot_ncp_LIBTOOLFLAGS                                                    = \
     $(LIBTOOLFLAGS_COMMON)                                               \
     $(NULL)
 
-if OPENTHREAD_ENABLE_POSIX_APP_CLI
+if OPENTHREAD_POSIX_CONFIG_DAEMON_ENABLE
+bin_PROGRAMS                                                          += \
+    ot-ctl                                                               \
+    ot-daemon                                                            \
+    $(NULL)
+else # OPENTHREAD_POSIX_CONFIG_DAEMON_ENABLE
+if OPENTHREAD_ENABLE_CLI
 bin_PROGRAMS                                                          += \
     ot-cli                                                               \
     $(NULL)
 endif
+if OPENTHREAD_ENABLE_NCP
+bin_PROGRAMS                                                          += \
+    ot-ncp                                                               \
+    $(NULL)
+endif
+endif # OPENTHREAD_POSIX_CONFIG_DAEMON_ENABLE
+
+ot_ctl_SOURCES                                                         = \
+    client.cpp                                                           \
+    $(NULL)
+
+ot_ctl_CPPFLAGS                                                        = \
+    $(CPPFLAGS_COMMON)                                                   \
+    $(NULL)
+
+ot_daemon_CPPFLAGS                                                     = \
+    $(CPPFLAGS_COMMON)                                                   \
+    -DOPENTHREAD_POSIX_APP_TYPE=OT_POSIX_APP_TYPE_CLI                    \
+    $(NULL)
+
+ot_daemon_SOURCES                                                      = \
+    main.c                                                               \
+    $(NULL)
+
+ot_daemon_LDADD                                                        = \
+    $(top_builddir)/src/cli/libopenthread-cli-ftd.a                      \
+    $(top_builddir)/src/ncp/libopenthread-ncp-ftd.a                      \
+    $(top_builddir)/src/core/libopenthread-ftd.a                         \
+    $(LDADD_COMMON)                                                      \
+    $(top_builddir)/src/cli/libopenthread-cli-ftd.a                      \
+    $(top_builddir)/src/ncp/libopenthread-ncp-ftd.a                      \
+    $(top_builddir)/src/core/libopenthread-ftd.a                         \
+    $(LDADD_COMMON)                                                      \
+    $(NULL)
+
+ot_daemon_LDFLAGS                                                      = \
+    $(LDFLAGS_COMMON)                                                    \
+    $(NULL)
+
+ot_daemon_LIBTOOLFLAGS                                                 = \
+    $(LIBTOOLFLAGS_COMMON)                                               \
+    $(NULL)
 
 ot_cli_CPPFLAGS                                                        = \
     $(CPPFLAGS_COMMON)                                                   \
-    -DOPENTHREAD_POSIX_APP=2                                             \
+    -DOPENTHREAD_POSIX_APP_TYPE=OT_POSIX_APP_TYPE_CLI                    \
     $(NULL)
 
 ot_cli_SOURCES                                                         = \
     main.c                                                               \
+    console_cli.cpp                                                      \
     $(NULL)
 
 ot_cli_LDADD                                                           = \
     $(top_builddir)/src/cli/libopenthread-cli-ftd.a                      \
+    $(top_builddir)/src/ncp/libopenthread-ncp-ftd.a                      \
     $(top_builddir)/src/core/libopenthread-ftd.a                         \
     $(LDADD_COMMON)                                                      \
+    $(top_builddir)/src/cli/libopenthread-cli-ftd.a                      \
+    $(top_builddir)/src/ncp/libopenthread-ncp-ftd.a                      \
     $(top_builddir)/src/core/libopenthread-ftd.a                         \
     $(LDADD_COMMON)                                                      \
     $(NULL)
@@ -144,7 +190,16 @@ ot_cli_LDFLAGS                                                        += -Wl,-Ma
 endif
 
 if OPENTHREAD_BUILD_COVERAGE
+CPPFLAGS_COMMON                                                       += \
+    -DOPENTHREAD_ENABLE_COVERAGE                                         \
+    $(NULL)
+
 CLEANFILES                                                             = $(wildcard *.gcda *.gcno)
 endif # OPENTHREAD_BUILD_COVERAGE
+endif # OPENTHREAD_ENABLE_EXECUTABLE
+
+noinst_HEADERS                                                         = \
+    console_cli.h                                                        \
+    $(NULL)
 
 include $(abs_top_nlbuild_autotools_dir)/automake/post.am

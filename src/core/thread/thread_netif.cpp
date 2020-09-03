@@ -1,4 +1,3 @@
-
 /*
  *  Copyright (c) 2016, The OpenThread Authors.
  *  All rights reserved.
@@ -37,30 +36,35 @@
 #include "common/code_utils.hpp"
 #include "common/encoding.hpp"
 #include "common/instance.hpp"
+#include "common/locator-getters.hpp"
 #include "common/message.hpp"
 #include "net/ip6.hpp"
 #include "net/netif.hpp"
 #include "net/udp6.hpp"
 #include "thread/mle.hpp"
 #include "thread/thread_tlvs.hpp"
-#include "thread/thread_uri_paths.hpp"
-
-using ot::Encoding::BigEndian::HostSwap16;
+#include "thread/uri_paths.hpp"
 
 namespace ot {
 
 ThreadNetif::ThreadNetif(Instance &aInstance)
-    : Netif(aInstance, OT_NETIF_INTERFACE_ID_THREAD)
-    , mCoap(aInstance)
-#if OPENTHREAD_ENABLE_DHCP6_CLIENT
+    : Netif(aInstance)
+    , mTmfAgent(aInstance)
+#if OPENTHREAD_CONFIG_DHCP6_CLIENT_ENABLE
     , mDhcp6Client(aInstance)
-#endif // OPENTHREAD_ENABLE_DHCP6_CLIENT
-#if OPENTHREAD_ENABLE_DHCP6_SERVER
+#endif
+#if OPENTHREAD_CONFIG_DHCP6_SERVER_ENABLE
     , mDhcp6Server(aInstance)
-#endif // OPENTHREAD_ENABLE_DHCP6_SERVER
-#if OPENTHREAD_ENABLE_DNS_CLIENT
-    , mDnsClient(aInstance.GetThreadNetif())
-#endif // OPENTHREAD_ENABLE_DNS_CLIENT
+#endif
+#if OPENTHREAD_CONFIG_IP6_SLAAC_ENABLE
+    , mSlaac(aInstance)
+#endif
+#if OPENTHREAD_CONFIG_DNS_CLIENT_ENABLE
+    , mDnsClient(aInstance)
+#endif
+#if OPENTHREAD_CONFIG_SNTP_CLIENT_ENABLE
+    , mSntpClient(aInstance)
+#endif
     , mActiveDataset(aInstance)
     , mPendingDataset(aInstance)
     , mKeyManager(aInstance)
@@ -68,98 +72,120 @@ ThreadNetif::ThreadNetif(Instance &aInstance)
     , mMac(aInstance)
     , mMeshForwarder(aInstance)
     , mMleRouter(aInstance)
-#if OPENTHREAD_ENABLE_BORDER_ROUTER || OPENTHREAD_ENABLE_SERVICE
+    , mDiscoverScanner(aInstance)
+#if OPENTHREAD_CONFIG_BORDER_ROUTER_ENABLE || OPENTHREAD_CONFIG_TMF_NETDATA_SERVICE_ENABLE
     , mNetworkDataLocal(aInstance)
 #endif
     , mNetworkDataLeader(aInstance)
-#if OPENTHREAD_FTD || OPENTHREAD_ENABLE_MTD_NETWORK_DIAGNOSTIC
+#if OPENTHREAD_FTD || OPENTHREAD_CONFIG_BORDER_ROUTER_ENABLE || OPENTHREAD_CONFIG_TMF_NETDATA_SERVICE_ENABLE
+    , mNetworkDataNotifier(aInstance)
+#endif
+#if OPENTHREAD_FTD || OPENTHREAD_CONFIG_TMF_NETWORK_DIAG_MTD_ENABLE
     , mNetworkDiagnostic(aInstance)
 #endif
     , mIsUp(false)
-#if OPENTHREAD_ENABLE_COMMISSIONER && OPENTHREAD_FTD
+#if OPENTHREAD_CONFIG_BORDER_AGENT_ENABLE
+    , mBorderAgent(aInstance)
+#endif
+#if OPENTHREAD_CONFIG_COMMISSIONER_ENABLE && OPENTHREAD_FTD
     , mCommissioner(aInstance)
-#endif // OPENTHREAD_ENABLE_COMMISSIONER && OPENTHREAD_FTD
-#if OPENTHREAD_ENABLE_DTLS
-    , mDtls(aInstance)
+#endif
+#if OPENTHREAD_CONFIG_DTLS_ENABLE
     , mCoapSecure(aInstance)
 #endif
-#if OPENTHREAD_ENABLE_JOINER
+#if OPENTHREAD_CONFIG_JOINER_ENABLE
     , mJoiner(aInstance)
-#endif // OPENTHREAD_ENABLE_JOINER
-#if OPENTHREAD_ENABLE_JAM_DETECTION
+#endif
+#if OPENTHREAD_CONFIG_JAM_DETECTION_ENABLE
     , mJamDetector(aInstance)
-#endif // OPENTHREAD_ENABLE_JAM_DETECTTION
+#endif
 #if OPENTHREAD_FTD
-#if OPENTHREAD_ENABLE_TMF_PROXY
-    , mTmfProxy(mMleRouter.GetMeshLocal16(), mCoap)
-#endif // OPENTHREAD_ENABLE_TMF_PROXY
     , mJoinerRouter(aInstance)
     , mLeader(aInstance)
     , mAddressResolver(aInstance)
-#endif // OPENTHREAD_FTD
+#endif
+#if (OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2)
+    , mBackboneRouterLeader(aInstance)
+#endif
+#if OPENTHREAD_FTD && OPENTHREAD_CONFIG_BACKBONE_ROUTER_ENABLE
+    , mBackboneRouterLocal(aInstance)
+    , mBackboneRouterManager(aInstance)
+#endif
+#if OPENTHREAD_CONFIG_MLR_ENABLE || OPENTHREAD_CONFIG_TMF_PROXY_MLR_ENABLE
+    , mMlrManager(aInstance)
+#endif
+
+#if OPENTHREAD_CONFIG_DUA_ENABLE || OPENTHREAD_CONFIG_TMF_PROXY_DUA_ENABLE
+    , mDuaManager(aInstance)
+#endif
     , mChildSupervisor(aInstance)
     , mSupervisionListener(aInstance)
     , mAnnounceBegin(aInstance)
     , mPanIdQuery(aInstance)
     , mEnergyScan(aInstance)
-#if OPENTHREAD_CONFIG_ENABLE_TIME_SYNC
+#if OPENTHREAD_CONFIG_TIME_SYNC_ENABLE
     , mTimeSync(aInstance)
 #endif
 {
-    mCoap.SetInterceptor(&ThreadNetif::TmfFilter, this);
 }
 
-otError ThreadNetif::Up(void)
+void ThreadNetif::Up(void)
 {
-    if (!mIsUp)
-    {
-        // Enable the MAC just in case it was disabled while the Interface was down.
-        mMac.SetEnabled(true);
-        GetIp6().AddNetif(*this);
-        mMeshForwarder.Start();
-        mCoap.Start(kCoapUdpPort);
-#if OPENTHREAD_ENABLE_DNS_CLIENT
-        mDnsClient.Start();
-#endif
-#if OPENTHREAD_ENABLE_CHANNEL_MONITOR
-        GetInstance().GetChannelMonitor().Start();
-#endif
-        mMleRouter.Enable();
-        mIsUp = true;
-    }
+    VerifyOrExit(!mIsUp, OT_NOOP);
 
-    return OT_ERROR_NONE;
+    // Enable the MAC just in case it was disabled while the Interface was down.
+    Get<Mac::Mac>().SetEnabled(true);
+#if OPENTHREAD_CONFIG_CHANNEL_MONITOR_ENABLE
+    IgnoreError(Get<Utils::ChannelMonitor>().Start());
+#endif
+    Get<MeshForwarder>().Start();
+
+    mIsUp = true;
+
+    SubscribeAllNodesMulticast();
+    IgnoreError(Get<Mle::MleRouter>().Enable());
+    IgnoreError(Get<Tmf::TmfAgent>().Start());
+#if OPENTHREAD_CONFIG_DNS_CLIENT_ENABLE
+    IgnoreError(Get<Dns::Client>().Start());
+#endif
+#if OPENTHREAD_CONFIG_SNTP_CLIENT_ENABLE
+    IgnoreError(Get<Sntp::Client>().Start());
+#endif
+    Get<Notifier>().Signal(kEventThreadNetifStateChanged);
+
+exit:
+    return;
 }
 
-otError ThreadNetif::Down(void)
+void ThreadNetif::Down(void)
 {
-    mCoap.Stop();
-#if OPENTHREAD_ENABLE_DNS_CLIENT
-    mDnsClient.Stop();
+    VerifyOrExit(mIsUp, OT_NOOP);
+
+#if OPENTHREAD_CONFIG_DNS_CLIENT_ENABLE
+    IgnoreError(Get<Dns::Client>().Stop());
 #endif
-#if OPENTHREAD_ENABLE_CHANNEL_MONITOR
-    GetInstance().GetChannelMonitor().Stop();
+#if OPENTHREAD_CONFIG_SNTP_CLIENT_ENABLE
+    IgnoreError(Get<Sntp::Client>().Stop());
 #endif
-    mMleRouter.Disable();
-    mMeshForwarder.Stop();
-    GetIp6().RemoveNetif(*this);
+#if OPENTHREAD_CONFIG_DTLS_ENABLE
+    Get<Coap::CoapSecure>().Stop();
+#endif
+    IgnoreError(Get<Tmf::TmfAgent>().Stop());
+    IgnoreError(Get<Mle::MleRouter>().Disable());
     RemoveAllExternalUnicastAddresses();
     UnsubscribeAllExternalMulticastAddresses();
+    UnsubscribeAllRoutersMulticast();
+    UnsubscribeAllNodesMulticast();
+
     mIsUp = false;
-
-#if OPENTHREAD_ENABLE_DTLS
-    mDtls.Stop();
+    Get<MeshForwarder>().Stop();
+#if OPENTHREAD_CONFIG_CHANNEL_MONITOR_ENABLE
+    IgnoreError(Get<Utils::ChannelMonitor>().Stop());
 #endif
+    Get<Notifier>().Signal(kEventThreadNetifStateChanged);
 
-    return OT_ERROR_NONE;
-}
-
-otError ThreadNetif::GetLinkAddress(Ip6::LinkAddress &address) const
-{
-    address.mType       = Ip6::LinkAddress::kEui64;
-    address.mLength     = sizeof(address.mExtAddress);
-    address.mExtAddress = mMac.GetExtAddress();
-    return OT_ERROR_NONE;
+exit:
+    return;
 }
 
 otError ThreadNetif::RouteLookup(const Ip6::Address &aSource, const Ip6::Address &aDestination, uint8_t *aPrefixMatch)
@@ -167,9 +193,9 @@ otError ThreadNetif::RouteLookup(const Ip6::Address &aSource, const Ip6::Address
     otError  error;
     uint16_t rloc;
 
-    SuccessOrExit(error = mNetworkDataLeader.RouteLookup(aSource, aDestination, aPrefixMatch, &rloc));
+    SuccessOrExit(error = Get<NetworkData::Leader>().RouteLookup(aSource, aDestination, aPrefixMatch, &rloc));
 
-    if (rloc == mMleRouter.GetRloc16())
+    if (rloc == Get<Mle::MleRouter>().GetRloc16())
     {
         error = OT_ERROR_NO_ROUTE;
     }
@@ -178,29 +204,9 @@ exit:
     return error;
 }
 
-otError ThreadNetif::TmfFilter(const Message &aMessage, const Ip6::MessageInfo &aMessageInfo, void *aContext)
+bool ThreadNetif::IsOnMesh(const Ip6::Address &aAddress) const
 {
-    OT_UNUSED_VARIABLE(aMessage);
-
-    return static_cast<ThreadNetif *>(aContext)->IsTmfMessage(aMessageInfo) ? OT_ERROR_NONE : OT_ERROR_NOT_TMF;
-}
-
-bool ThreadNetif::IsTmfMessage(const Ip6::MessageInfo &aMessageInfo)
-{
-    bool rval = true;
-
-    // A TMF message must comply with following rules:
-    // 1. The destination is a Mesh Local Address or a Link-Local Multicast Address or a Realm-Local Multicast Address,
-    //    and the source is a Mesh Local Address.
-    // 2. Both the destination and the source are Link-Local Addresses.
-    VerifyOrExit(
-        ((mMleRouter.IsMeshLocalAddress(aMessageInfo.GetSockAddr()) ||
-          aMessageInfo.GetSockAddr().IsLinkLocalMulticast() || aMessageInfo.GetSockAddr().IsRealmLocalMulticast()) &&
-         mMleRouter.IsMeshLocalAddress(aMessageInfo.GetPeerAddr())) ||
-            (aMessageInfo.GetSockAddr().IsLinkLocal() && aMessageInfo.GetPeerAddr().IsLinkLocal()),
-        rval = false);
-exit:
-    return rval;
+    return Get<NetworkData::Leader>().IsOnMesh(aAddress);
 }
 
 } // namespace ot

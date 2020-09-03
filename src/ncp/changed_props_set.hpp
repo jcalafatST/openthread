@@ -37,9 +37,9 @@
 
 #include <stddef.h>
 
-#include <openthread/types.h>
+#include <openthread/error.h>
 
-#include "spinel.h"
+#include "lib/spinel/spinel.h"
 
 namespace ot {
 namespace Ncp {
@@ -127,10 +127,13 @@ public:
      *
      * @param[in] aIndex     The index to an entry.
      *
-     * @returns A pointer to the entry associated with @p aIndex, or NULL if the index is beyond end of array.
+     * @returns A pointer to the entry associated with @p aIndex, or nullptr if the index is beyond end of array.
      *
      */
-    const Entry *GetEntry(uint8_t aIndex) const { return (aIndex < GetNumEntries()) ? &mSupportedProps[aIndex] : NULL; }
+    const Entry *GetEntry(uint8_t aIndex) const
+    {
+        return (aIndex < GetNumEntries()) ? &mSupportedProps[aIndex] : nullptr;
+    }
 
     /**
      * This method indicates if the entry associated with an index is in the set (i.e., it has been changed and
@@ -196,14 +199,14 @@ private:
     uint8_t GetNumEntries(void) const;
     void    Add(spinel_prop_key_t aPropKey, spinel_status_t aStatus);
 
-    static void SetBit(uint32_t &aBitset, uint8_t aBitIndex) { aBitset |= (1U << aBitIndex); }
-    static void ClearBit(uint32_t &aBitset, uint8_t aBitIndex) { aBitset &= ~(1U << aBitIndex); }
-    static bool IsBitSet(uint32_t aBitset, uint8_t aBitIndex) { return (aBitset & (1U << aBitIndex)) != 0; }
+    static void SetBit(uint64_t &aBitset, uint8_t aBitIndex) { aBitset |= (1ULL << aBitIndex); }
+    static void ClearBit(uint64_t &aBitset, uint8_t aBitIndex) { aBitset &= ~(1ULL << aBitIndex); }
+    static bool IsBitSet(uint64_t aBitset, uint8_t aBitIndex) { return (aBitset & (1ULL << aBitIndex)) != 0; }
 
     static const Entry mSupportedProps[];
 
-    uint32_t mChangedSet;
-    uint32_t mFilterSet;
+    uint64_t mChangedSet;
+    uint64_t mFilterSet;
 };
 
 } // namespace Ncp

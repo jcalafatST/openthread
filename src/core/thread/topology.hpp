@@ -36,22 +36,28 @@
 
 #include "openthread-core-config.h"
 
+#include <openthread/thread_ftd.h>
+
+#include "common/clearable.hpp"
+#include "common/locator.hpp"
 #include "common/message.hpp"
 #include "common/random.hpp"
-#include "mac/mac_frame.hpp"
+#include "common/timer.hpp"
+#include "mac/mac_types.hpp"
 #include "net/ip6.hpp"
+#include "thread/csl_tx_scheduler.hpp"
+#include "thread/indirect_sender.hpp"
 #include "thread/link_quality.hpp"
 #include "thread/mle_tlvs.hpp"
+#include "thread/mle_types.hpp"
 
 namespace ot {
-
-class Instance;
 
 /**
  * This class represents a Thread neighbor.
  *
  */
-class Neighbor
+class Neighbor : public InstanceLocatorInit
 {
 public:
     /**
@@ -71,6 +77,122 @@ public:
     };
 
     /**
+     * This enumeration defines state filters used for finding a neighbor or iterating through the child/neighbor table.
+     *
+     * Each filter definition accepts a subset of `State` values.
+     *
+     */
+    enum StateFilter
+    {
+        kInStateValid,                     ///< Accept neighbor only in `kStateValid`.
+        kInStateValidOrRestoring,          ///< Accept neighbor with `IsStateValidOrRestoring()` being `true`.
+        kInStateChildIdRequest,            ///< Accept neighbor only in `Child:kStateChildIdRequest`.
+        kInStateValidOrAttaching,          ///< Accept neighbor with `IsStateValidOrAttaching()` being `true`.
+        kInStateInvalid,                   ///< Accept neighbor only in `kStateInvalid`.
+        kInStateAnyExceptInvalid,          ///< Accept neighbor in any state except `kStateInvalid`.
+        kInStateAnyExceptValidOrRestoring, ///< Accept neighbor in any state except `IsStateValidOrRestoring()`.
+        kInStateAny,                       ///< Accept neighbor in any state.
+    };
+
+    /**
+     * This class represents an Address Matcher used to find a neighbor (child/router) with a given MAC address also
+     * matching a given state filter.
+     *
+     */
+    class AddressMatcher
+    {
+    public:
+        /**
+         * This constructor initializes the `AddressMatcher` with a given MAC short address (RCOC16) and state filter.
+         *
+         * @param[in]  aShortAddress   A MAC short address (RLOC16).
+         * @param[in]  aStateFilter    A state filter.
+         *
+         */
+        AddressMatcher(Mac::ShortAddress aShortAddress, StateFilter aStateFilter)
+            : AddressMatcher(aStateFilter, aShortAddress, nullptr)
+        {
+        }
+
+        /**
+         * This constructor initializes the `AddressMatcher` with a given MAC extended address and state filter.
+         *
+         * @param[in]  aExtAddress     A MAC extended address.
+         * @param[in]  aStateFilter    A state filter.
+         *
+         */
+        AddressMatcher(const Mac::ExtAddress &aExtAddress, StateFilter aStateFilter)
+            : AddressMatcher(aStateFilter, Mac::kShortAddrInvalid, &aExtAddress)
+        {
+        }
+
+        /**
+         * This constructor initializes the `AddressMatcher` with a given MAC address and state filter.
+         *
+         * @param[in]  aMacAddress     A MAC address.
+         * @param[in]  aStateFilter    A state filter.
+         *
+         */
+        AddressMatcher(const Mac::Address &aMacAddress, StateFilter aStateFilter)
+            : AddressMatcher(aStateFilter,
+                             aMacAddress.IsShort() ? aMacAddress.GetShort()
+                                                   : static_cast<Mac::ShortAddress>(Mac::kShortAddrInvalid),
+                             aMacAddress.IsExtended() ? &aMacAddress.GetExtended() : nullptr)
+        {
+        }
+
+        /**
+         * This constructor initializes the `AddressMatcher` with a given state filter (it accepts any address).
+         *
+         * @param[in]  aStateFilter    A state filter.
+         *
+         */
+        explicit AddressMatcher(StateFilter aStateFilter)
+            : AddressMatcher(aStateFilter, Mac::kShortAddrInvalid, nullptr)
+        {
+        }
+
+        /**
+         * This method indicates if a given neighbor matches the address and state filter of `AddressMatcher`.
+         *
+         * @param[in] aNeighbor   A neighbor.
+         *
+         * @retval TRUE   Neighbor @p aNeighbor matches the address and state filter.
+         * @retval FALSE  Neighbor @p aNeighbor does not match the address or state filter.
+         *
+         */
+        bool Matches(const Neighbor &aNeighbor) const;
+
+    private:
+        AddressMatcher(StateFilter aStateFilter, Mac::ShortAddress aShortAddress, const Mac::ExtAddress *aExtAddress)
+            : mStateFilter(aStateFilter)
+            , mShortAddress(aShortAddress)
+            , mExtAddress(aExtAddress)
+        {
+        }
+
+        StateFilter            mStateFilter;
+        Mac::ShortAddress      mShortAddress;
+        const Mac::ExtAddress *mExtAddress;
+    };
+
+    /**
+     * This type represents diagnostic information for a neighboring node.
+     *
+     */
+    class Info : public otNeighborInfo, public Clearable<Info>
+    {
+    public:
+        /**
+         * This method sets the `Info` instance from a given `Neighbor`.
+         *
+         * @param[in] aNeighbor   A neighbor.
+         *
+         */
+        void SetFrom(const Neighbor &aNeighbor);
+    };
+
+    /**
      * This method returns the current state.
      *
      * @returns The current state.
@@ -87,7 +209,39 @@ public:
     void SetState(State aState) { mState = static_cast<uint8_t>(aState); }
 
     /**
-     * This method indicates whether the neighbor/child is being restored.
+     * This method indicates whether the neighbor is in the Invalid state.
+     *
+     * @returns TRUE if the neighbor is in the Invalid state, FALSE otherwise.
+     *
+     */
+    bool IsStateInvalid(void) const { return (mState == kStateInvalid); }
+
+    /**
+     * This method indicates whether the neighbor is in the Child ID Request state.
+     *
+     * @returns TRUE if the neighbor is in the Child ID Request state, FALSE otherwise.
+     *
+     */
+    bool IsStateChildIdRequest(void) const { return (mState == kStateChildIdRequest); }
+
+    /**
+     * This method indicates whether the neighbor is in the Link Request state.
+     *
+     * @returns TRUE if the neighbor is in the Link Request state, FALSE otherwise.
+     *
+     */
+    bool IsStateLinkRequest(void) const { return (mState == kStateLinkRequest); }
+
+    /**
+     * This method indicates whether the neighbor is in the Parent Response state.
+     *
+     * @returns TRUE if the neighbor is in the Parent Response state, FALSE otherwise.
+     *
+     */
+    bool IsStateParentResponse(void) const { return (mState == kStateParentResponse); }
+
+    /**
+     * This method indicates whether the neighbor is being restored.
      *
      * @returns TRUE if the neighbor is being restored, FALSE otherwise.
      *
@@ -95,9 +249,25 @@ public:
     bool IsStateRestoring(void) const { return (mState == kStateRestored) || (mState == kStateChildUpdateRequest); }
 
     /**
-     * This method indicates whether the neighbor/child is in valid state or if it is being restored.
+     * This method indicates whether the neighbor is in the Restored state.
      *
-     * When in these states messages can be sent to and/or received from the neighbor/child.
+     * @returns TRUE if the neighbor is in the Restored state, FALSE otherwise.
+     *
+     */
+    bool IsStateRestored(void) const { return (mState == kStateRestored); }
+
+    /**
+     * This method indicates whether the neighbor is valid (frame counters are synchronized).
+     *
+     * @returns TRUE if the neighbor is valid, FALSE otherwise.
+     *
+     */
+    bool IsStateValid(void) const { return (mState == kStateValid); }
+
+    /**
+     * This method indicates whether the neighbor is in valid state or if it is being restored.
+     *
+     * When in these states messages can be sent to and/or received from the neighbor.
      *
      * @returns TRUE if the neighbor is in valid, restored, or being restored states, FALSE otherwise.
      *
@@ -105,12 +275,43 @@ public:
     bool IsStateValidOrRestoring(void) const { return (mState == kStateValid) || IsStateRestoring(); }
 
     /**
+     * This method indicates if the neighbor state is valid, attaching, or restored.
+     *
+     * The states `kStateRestored`, `kStateChildIdRequest`, `kStateChildUpdateRequest`, `kStateValid`, and
+     * `kStateLinkRequest` are considered as valid, attaching, or restored.
+     *
+     * @returns TRUE if the neighbor state is valid, attaching, or restored, FALSE otherwise.
+     *
+     */
+    bool IsStateValidOrAttaching(void) const;
+
+    /**
+     * This method indicates whether neighbor state matches a given state filter.
+     *
+     * @param[in] aFilter   A state filter (`StateFilter` enumeration) to match against.
+     *
+     * @returns TRUE if the neighbor state matches the filter, FALSE otherwise.
+     *
+     */
+    bool MatchesFilter(StateFilter aFilter) const;
+
+    /**
+     * This method indicates whether neighbor matches a given `AddressMatcher`.
+     *
+     * @param[in]  aMatcher   An `AddressMatcher` to match against.
+     *
+     * @returns TRUE if the neighbor matches the address and state filter of @p aMatcher, FALSE otherwise.
+     *
+     */
+    bool Matches(const AddressMatcher &aMatcher) const { return aMatcher.Matches(*this); }
+
+    /**
      * This method gets the device mode flags.
      *
      * @returns The device mode flags.
      *
      */
-    uint8_t GetDeviceMode(void) const { return mMode; }
+    Mle::DeviceMode GetDeviceMode(void) const { return Mle::DeviceMode(mMode); }
 
     /**
      * This method sets the device mode flags.
@@ -118,7 +319,7 @@ public:
      * @param[in]  aMode  The device mode flags.
      *
      */
-    void SetDeviceMode(uint8_t aMode) { mMode = aMode; }
+    void SetDeviceMode(Mle::DeviceMode aMode) { mMode = aMode.Get(); }
 
     /**
      * This method indicates whether or not the device is rx-on-when-idle.
@@ -126,7 +327,7 @@ public:
      * @returns TRUE if rx-on-when-idle, FALSE otherwise.
      *
      */
-    bool IsRxOnWhenIdle(void) const { return (mMode & Mle::ModeTlv::kModeRxOnWhenIdle) != 0; }
+    bool IsRxOnWhenIdle(void) const { return GetDeviceMode().IsRxOnWhenIdle(); }
 
     /**
      * This method indicates whether or not the device is a Full Thread Device.
@@ -134,7 +335,7 @@ public:
      * @returns TRUE if a Full Thread Device, FALSE otherwise.
      *
      */
-    bool IsFullThreadDevice(void) const { return (mMode & Mle::ModeTlv::kModeFFD) != 0; }
+    bool IsFullThreadDevice(void) const { return GetDeviceMode().IsFullThreadDevice(); }
 
     /**
      * This method indicates whether or not the device uses secure IEEE 802.15.4 Data Request messages.
@@ -142,7 +343,7 @@ public:
      * @returns TRUE if using secure IEEE 802.15.4 Data Request messages, FALSE otherwise.
      *
      */
-    bool IsSecureDataRequest(void) const { return (mMode & Mle::ModeTlv::kModeSecureDataRequest) != 0; }
+    bool IsSecureDataRequest(void) const { return GetDeviceMode().IsSecureDataRequest(); }
 
     /**
      * This method indicates whether or not the device requests Full Network Data.
@@ -150,21 +351,13 @@ public:
      * @returns TRUE if requests Full Network Data, FALSE otherwise.
      *
      */
-    bool IsFullNetworkData(void) const { return (mMode & Mle::ModeTlv::kModeFullNetworkData) != 0; }
+    bool IsFullNetworkData(void) const { return GetDeviceMode().IsFullNetworkData(); }
 
     /**
      * This method sets all bytes of the Extended Address to zero.
      *
      */
     void ClearExtAddress(void) { memset(&mMacAddr, 0, sizeof(mMacAddr)); }
-
-    /**
-     * This method returns the Extended Address.
-     *
-     * @returns A reference to the Extended Address.
-     *
-     */
-    Mac::ExtAddress &GetExtAddress(void) { return mMacAddr; }
 
     /**
      * This method returns the Extended Address.
@@ -204,7 +397,7 @@ public:
      * @returns The last heard time.
      *
      */
-    uint32_t GetLastHeard(void) const { return mLastHeard; }
+    TimeMilli GetLastHeard(void) const { return mLastHeard; }
 
     /**
      * This method sets the last heard time.
@@ -212,7 +405,7 @@ public:
      * @param[in]  aLastHeard  The last heard time.
      *
      */
-    void SetLastHeard(uint32_t aLastHeard) { mLastHeard = aLastHeard; }
+    void SetLastHeard(TimeMilli aLastHeard) { mLastHeard = aLastHeard; }
 
     /**
      * This method gets the link frame counter value.
@@ -271,20 +464,37 @@ public:
     void SetRloc16(uint16_t aRloc16) { mRloc16 = aRloc16; }
 
     /**
-     * This method indicates whether an IEEE 802.15.4 Data Request message was received.
+     * This method indicates whether or not it is a valid Thread 1.1 neighbor.
      *
-     * @returns TRUE if an IEEE 802.15.4 Data Request message was received, FALSE otherwise.
+     * @returns TRUE if it is a valid Thread 1.1 neighbor, FALSE otherwise.
      *
      */
-    bool IsDataRequestPending(void) const { return mDataRequest; }
+    bool IsThreadVersion1p1(void) const { return mState != kStateInvalid && mVersion == OT_THREAD_VERSION_1_1; }
 
     /**
-     * This method sets the indicator for whether an IEEE 802.15.4 Data Request message was received.
+     * This method indicates whether Enhanced Keep-Alive is supported or not.
      *
-     * @param[in]  aPending  TRUE if an IEEE 802.15.4 Data Request message was received, FALSE otherwise.
+     * @returns TRUE if Enhanced Keep-Alive is supported, FALSE otherwise.
      *
      */
-    void SetDataRequestPending(bool aPending) { mDataRequest = aPending; }
+    bool IsEnhancedKeepAliveSupported(void) const
+    {
+        return mState != kStateInvalid && mVersion >= OT_THREAD_VERSION_1_2;
+    }
+
+    /**
+     * This method gets the device MLE version.
+     *
+     */
+    uint8_t GetVersion(void) const { return mVersion; }
+
+    /**
+     * This method sets the device MLE version.
+     *
+     * @param[in]  aVersion  The device MLE version.
+     *
+     */
+    void SetVersion(uint8_t aVersion) { mVersion = aVersion; }
 
     /**
      * This method gets the number of consecutive link failures.
@@ -315,6 +525,14 @@ public:
     LinkQualityInfo &GetLinkInfo(void) { return mLinkInfo; }
 
     /**
+     * This method returns the LinkQualityInfo object.
+     *
+     * @returns The LinkQualityInfo object.
+     *
+     */
+    const LinkQualityInfo &GetLinkInfo(void) const { return mLinkInfo; }
+
+    /**
      * This method generates a new challenge value for MLE Link Request/Response exchanges.
      *
      */
@@ -336,7 +554,7 @@ public:
      */
     uint8_t GetChallengeSize(void) const { return sizeof(mValidPending.mPending.mChallenge); }
 
-#if OPENTHREAD_CONFIG_ENABLE_TIME_SYNC
+#if OPENTHREAD_CONFIG_TIME_SYNC_ENABLE
     /**
      * This method indicates whether or not time sync feature is enabled.
      *
@@ -354,9 +572,18 @@ public:
     void SetTimeSyncEnabled(bool aEnabled) { mTimeSyncEnabled = aEnabled; }
 #endif
 
+protected:
+    /**
+     * This method initializes the `Neighbor` object.
+     *
+     * @param[in] aInstance  A reference to OpenThread instance.
+     *
+     */
+    void Init(Instance &aInstance);
+
 private:
     Mac::ExtAddress mMacAddr;   ///< The IEEE 802.15.4 Extended Address
-    uint32_t        mLastHeard; ///< Time when last heard.
+    TimeMilli       mLastHeard; ///< Time when last heard.
     union
     {
         struct
@@ -366,21 +593,21 @@ private:
         } mValid;
         struct
         {
-            uint8_t mChallenge[Mle::ChallengeTlv::kMaxSize]; ///< The challenge value
+            uint8_t mChallenge[Mle::kMaxChallengeSize]; ///< The challenge value
         } mPending;
     } mValidPending;
 
-    uint32_t mKeySequence;     ///< Current key sequence
-    uint16_t mRloc16;          ///< The RLOC16
-    uint8_t  mState : 3;       ///< The link state
-    uint8_t  mMode : 4;        ///< The MLE device mode
-    bool     mDataRequest : 1; ///< Indicates whether or not a Data Poll was received
-#if OPENTHREAD_CONFIG_ENABLE_TIME_SYNC
+    uint32_t mKeySequence; ///< Current key sequence
+    uint16_t mRloc16;      ///< The RLOC16
+    uint8_t  mState : 4;   ///< The link state
+    uint8_t  mMode : 4;    ///< The MLE device mode
+#if OPENTHREAD_CONFIG_TIME_SYNC_ENABLE
     uint8_t mLinkFailures : 7;    ///< Consecutive link failure count
     bool    mTimeSyncEnabled : 1; ///< Indicates whether or not time sync feature is enabled.
 #else
     uint8_t mLinkFailures; ///< Consecutive link failure count
 #endif
+    uint8_t         mVersion;  ///< The MLE version
     LinkQualityInfo mLinkInfo; ///< Link quality info (contains average RSS, link margin and link quality)
 };
 
@@ -388,8 +615,16 @@ private:
  * This class represents a Thread Child.
  *
  */
-class Child : public Neighbor
+class Child : public Neighbor,
+              public IndirectSender::ChildInfo,
+              public DataPollHandler::ChildInfo
+#if OPENTHREAD_CONFIG_MAC_CSL_TRANSMITTER_ENABLE
+    ,
+              public CslTxScheduler::ChildInfo
+#endif
 {
+    class AddressIteratorBuilder;
+
 public:
     enum
     {
@@ -397,65 +632,191 @@ public:
     };
 
     /**
-     * This class defines an iterator used by `GetNextIp6Address()` to go through IPv6 address entries of a child.
+     * This class represents diagnostic information for a Thread Child.
      *
      */
-    class Ip6AddressIterator
+    class Info : public otChildInfo, public Clearable<Info>
     {
-        friend class Child;
+    public:
+        /**
+         * This method sets the `Info` instance from a given `Child`.
+         *
+         * @param[in] aChild   A neighbor.
+         *
+         */
+        void SetFrom(const Child &aChild);
+    };
+
+    /**
+     * This class defines an iterator used to go through IPv6 address entries of a child.
+     *
+     */
+    class AddressIterator
+    {
+        friend class AddressIteratorBuilder;
 
     public:
         /**
-         * This constructor initializes the iterator object.
-         *
-         * After initialization a call to `GetNextIp6Address()` would start at the first IPv6 address entry in the list.
+         * This type represents an index indicating the current IPv6 address entry to which the iterator is pointing.
          *
          */
-        Ip6AddressIterator(void)
-            : mIndex(0)
+        typedef otChildIp6AddressIterator Index;
+
+        /**
+         * This constructor initializes the iterator associated with a given `Child` starting from beginning of the
+         * IPv6 address list.
+         *
+         * @param[in] aChild    A reference to a child entry.
+         * @param[in] aFilter   An IPv6 address type filter restricting iterator to certain type of addresses.
+         *
+         */
+        AddressIterator(const Child &aChild, Ip6::Address::TypeFilter aFilter = Ip6::Address::kTypeAny)
+            : AddressIterator(aChild, 0, aFilter)
         {
         }
 
         /**
-         * This method resets the iterator.
+         * This constructor initializes the iterator associated with a given `Child` starting from a given index
          *
-         * After reset the next call to `GetNextIp6Address()` would start at the first IPv6 address entry in the list.
+         * @param[in]  aChild   A reference to the child entry.
+         * @param[in]  aIndex   An index (`Index`) with which to initialize the iterator.
+         * @param[in]  aFilter  An IPv6 address type filter restricting iterator to certain type of addresses.
          *
          */
-        void Reset(void) { mIndex = 0; }
+        AddressIterator(const Child &aChild, Index aIndex, Ip6::Address::TypeFilter aFilter = Ip6::Address::kTypeAny)
+            : mChild(aChild)
+            , mFilter(aFilter)
+            , mIndex(aIndex)
+        {
+            Update();
+        }
 
         /**
-         * This method sets the iterator from an `otChildIp6AddressIterator`
+         * This method converts the iterator into an index.
          *
-         * @param[in]   aChildAddressIterator  A child address iterator
+         * @returns An index corresponding to the iterator.
          *
          */
-        void Set(otChildIp6AddressIterator aChildAddressIterator) { mIndex = aChildAddressIterator; }
+        Index GetAsIndex(void) const { return mIndex; }
 
         /**
-         * This method returns the iterator as an `otChildIp6AddressIterator`
+         * This method gets the iterator's associated `Child` entry.
          *
-         * @returns The iterator as an `otChildIp6AddressIterator`
+         * @returns The associated child entry.
          *
          */
-        otChildIp6AddressIterator Get(void) const { return mIndex; }
+        const Child &GetChild(void) const { return mChild; }
+
+        /**
+         * This method gets the current `Child` IPv6 Address to which the iterator is pointing.
+         *
+         * @returns  A pointer to the associated IPv6 Address, or nullptr if iterator is done.
+         *
+         */
+        const Ip6::Address *GetAddress(void) const;
+
+        /**
+         * This method indicates whether the iterator has reached end of the list.
+         *
+         * @retval TRUE   There are no more entries in the list (reached end of the list).
+         * @retval FALSE  The current entry is valid.
+         *
+         */
+        bool IsDone(void) const { return (mIndex >= kMaxIndex); }
+
+        /**
+         * This method overloads `++` operator (pre-increment) to advance the iterator.
+         *
+         * The iterator is moved to point to the next `Address` entry.  If there are no more `Ip6::Address` entries
+         * `IsDone()` returns `true`.
+         *
+         */
+        void operator++(void) { mIndex++, Update(); }
+
+        /**
+         * This method overloads `++` operator (post-increment) to advance the iterator.
+         *
+         * The iterator is moved to point to the next `Address` entry.  If there are no more `Ip6::Address` entries
+         *  `IsDone()` returns `true`.
+         *
+         */
+        void operator++(int) { mIndex++, Update(); }
+
+        /**
+         * This method overloads the `*` dereference operator and gets a reference to `Ip6::Address` to which the
+         * iterator is currently pointing.
+         *
+         * This method MUST be used when the iterator is not done (i.e., `IsDone()` returns `false`).
+         *
+         * @returns A reference to the `Ip6::Address` entry currently pointed by the iterator.
+         *
+         */
+        const Ip6::Address &operator*(void)const { return *GetAddress(); }
+
+        /**
+         * This method overloads operator `==` to evaluate whether or not two `Iterator` instances are equal.
+         *
+         * This method MUST be used when the two iterators are associated with the same `Child` entry.
+         *
+         * @param[in]  aOther  The other `Iterator` to compare with.
+         *
+         * @retval TRUE   If the two `Iterator` objects are equal.
+         * @retval FALSE  If the two `Iterator` objects are not equal.
+         *
+         */
+        bool operator==(const AddressIterator &aOther) const { return (mIndex == aOther.mIndex); }
+
+        /**
+         * This method overloads operator `!=` to evaluate whether or not two `Iterator` instances are unequal.
+         *
+         * This method MUST be used when the two iterators are associated with the same `Child` entry.
+         *
+         * @param[in]  aOther  The other `Iterator` to compare with.
+         *
+         * @retval TRUE   If the two `Iterator` objects are unequal.
+         * @retval FALSE  If the two `Iterator` objects are not unequal.
+         *
+         */
+        bool operator!=(const AddressIterator &aOther) const { return !(*this == aOther); }
 
     private:
-        void Increment(void) { mIndex++; }
+        enum IteratorType : uint8_t
+        {
+            kEndIterator,
+        };
 
-        otChildIp6AddressIterator mIndex;
+        enum : uint16_t
+        {
+            kMaxIndex = OPENTHREAD_CONFIG_MLE_IP_ADDRS_PER_CHILD,
+        };
+
+        AddressIterator(const Child &aChild, IteratorType)
+            : mChild(aChild)
+            , mIndex(kMaxIndex)
+        {
+        }
+
+        void Update(void);
+
+        const Child &            mChild;
+        Ip6::Address::TypeFilter mFilter;
+        Index                    mIndex;
+        Ip6::Address             mMeshLocalAddress;
     };
 
     /**
-     * This method indicates if the child state is valid or being attached or being restored.
+     * This method initializes the `Child` object.
      *
-     * The states `kStateRestored`, `kStateChildIdRequest`, `kStateChildUpdateRequest`, `kStateValid`, (and
-     * `kStateLinkRequest) are considered as attached or being restored.
-     *
-     * @returns TRUE if the child is attached or being restored.
+     * @param[in] aInstance  A reference to OpenThread instance.
      *
      */
-    bool IsStateValidOrAttaching(void) const;
+    void Init(Instance &aInstance) { Neighbor::Init(aInstance); }
+
+    /**
+     * This method clears the child entry.
+     *
+     */
+    void Clear(void);
 
     /**
      * This method clears the IPv6 address list for the child.
@@ -466,32 +827,47 @@ public:
     /**
      * This method gets the mesh-local IPv6 address.
      *
-     * @param[in]    aInstance           A reference to the OpenThread instance.
      * @param[out]   aAddress            A reference to an IPv6 address to provide address (if any).
      *
      * @retval       OT_ERROR_NONE       Successfully found the mesh-local address and updated @p aAddress.
      * @retval       OT_ERROR_NOT_FOUND  No mesh-local IPv6 address in the IPv6 address list.
      *
      */
-    otError GetMeshLocalIp6Address(Instance &aInstance, Ip6::Address &aAddress) const;
+    otError GetMeshLocalIp6Address(Ip6::Address &aAddress) const;
 
     /**
-     * This method gets the next IPv6 address in the list.
+     * This method returns the Mesh Local Interface Identifier.
      *
-     * @param[in]    aInstance           A reference to the OpenThread instance.
-     * @param[inout] aIterator           A reference to an IPv6 address iterator.
-     * @param[out]   aAddress            A reference to an IPv6 address to provide the next address (if any).
-     *
-     * @retval       OT_ERROR_NONE       Successfully found the next address and updated @p aAddress and @p aIterator.
-     * @retval       OT_ERROR_NOT_FOUND  No subsequent IPv6 address exists in the IPv6 address list.
+     * @returns The Mesh Local Interface Identifier.
      *
      */
-    otError GetNextIp6Address(Instance &aInstance, Ip6AddressIterator &aIterator, Ip6::Address &aAddress) const;
+    const Ip6::InterfaceIdentifier &GetMeshLocalIid(void) const { return mMeshLocalIid; }
+
+    /**
+     * This method enables range-based `for` loop iteration over all (or a subset of) IPv6 addresses.
+     *
+     * This method should be used as follows: to iterate over all addresses
+     *
+     *     for (const Ip6::Address &address : child.IterateIp6Addresses()) { ... }
+     *
+     * or to iterate over a subset of IPv6 addresses determined by a given address type filter
+     *
+     *     for (const Ip6::Address &address : child.IterateIp6Addresses(Ip6::Address::kTypeMulticast)) { ... }
+     *
+     * @param[in] aFilter  An IPv6 address type filter restricting iteration to certain type of addresses (default is
+     *                     to accept any address type).
+     *
+     * @returns An IteratorBuilder instance.
+     *
+     */
+    AddressIteratorBuilder IterateIp6Addresses(Ip6::Address::TypeFilter aFilter = Ip6::Address::kTypeAny) const
+    {
+        return AddressIteratorBuilder(*this, aFilter);
+    }
 
     /**
      * This method adds an IPv6 address to the list.
      *
-     * @param[in]  aInstance          A reference to the OpenThread instance.
      * @param[in]  aAddress           A reference to IPv6 address to be added.
      *
      * @retval OT_ERROR_NONE          Successfully added the new address.
@@ -500,12 +876,11 @@ public:
      * @retval OT_ERROR_INVALID_ARGS  Address is invalid (it is the Unspecified Address).
      *
      */
-    otError AddIp6Address(Instance &aInstance, const Ip6::Address &aAddress);
+    otError AddIp6Address(const Ip6::Address &aAddress);
 
     /**
      * This method removes an IPv6 address from the list.
      *
-     * @param[in]  aInstance              A reference to the OpenThread instance.
      * @param[in]  aAddress               A reference to IPv6 address to be removed.
      *
      * @retval OT_ERROR_NONE              Successfully removed the address.
@@ -513,19 +888,28 @@ public:
      * @retval OT_ERROR_INVALID_ARGS      Address is invalid (it is the Unspecified Address).
      *
      */
-    otError RemoveIp6Address(Instance &aInstance, const Ip6::Address &aAddress);
+    otError RemoveIp6Address(const Ip6::Address &aAddress);
 
     /**
      * This method indicates whether an IPv6 address is in the list of IPv6 addresses of the child.
      *
-     * @param[in]  aInstance  A reference to the OpenThread instance.
      * @param[in]  aAddress   A reference to IPv6 address.
      *
      * @retval TRUE           The address exists on the list.
      * @retval FALSE          Address was not found in the list.
      *
      */
-    bool HasIp6Address(Instance &aInstance, const Ip6::Address &aAddress) const;
+    bool HasIp6Address(const Ip6::Address &aAddress) const;
+
+#if OPENTHREAD_CONFIG_TMF_PROXY_DUA_ENABLE
+    /**
+     * This method retrieves the Domain Unicast Address registered by the child.
+     *
+     * @returns A pointer to Domain Unicast Address registered by the child if there is.
+     *
+     */
+    const Ip6::Address *GetDomainUnicastAddress(void) const;
+#endif
 
     /**
      * This method gets the child timeout.
@@ -582,180 +966,6 @@ public:
     uint8_t GetChallengeSize(void) const { return sizeof(mAttachChallenge); }
 
     /**
-     * This method gets the IEEE 802.15.4 Frame Counter used during indirect retransmissions.
-     *
-     * @returns The IEEE 802.15.4 Frame Counter value.
-     *
-     */
-    uint32_t GetIndirectFrameCounter(void) const { return mIndirectFrameCounter; }
-
-    /**
-     * This method sets the IEEE 802.15.4 Frame Counter to use during indirect retransmissions.
-     *
-     * @param[in]  aFrameCounter  The IEEE 802.15.4 Frame Counter value.
-     *
-     */
-    void SetIndirectFrameCounter(uint32_t aFrameCounter) { mIndirectFrameCounter = aFrameCounter; }
-
-    /**
-     * This method gets the message buffer to use for indirect transmissions.
-     *
-     * @returns The message buffer.
-     *
-     */
-    Message *GetIndirectMessage(void) { return mIndirectMessage; }
-
-    /**
-     * This method sets the message buffer to use for indirect transmissions.
-     *
-     * @param[in]  aMessage  The message buffer.
-     *
-     */
-    void SetIndirectMessage(Message *aMessage) { mIndirectMessage = aMessage; }
-
-    /**
-     * This method gets the 6LoWPAN Fragment Offset to use for indirect transmissions.
-     *
-     * @returns The 6LoWPAN Fragment Offset value.
-     *
-     */
-    uint16_t GetIndirectFragmentOffset(void) const { return mIndirectFragmentOffset; }
-
-    /**
-     * This method sets the 6LoWPAN Fragment Offset to use for indirect transmissions.
-     *
-     * @param[in]  aFragmentOffset  The 6LoWPAN Fragment Offset value to use.
-     *
-     */
-    void SetIndirectFragmentOffset(uint16_t aFragmentOffset) { mIndirectFragmentOffset = aFragmentOffset; }
-
-    /**
-     * This method gets the transmission status (success/failure) of the indirect transmission.
-     *
-     * @returns The transmission status of indirect transmission, `true` indicating success, `false` indicating failure.
-     *
-     */
-    bool GetIndirectTxSuccess(void) const { return mIndirectTxSuccess; }
-
-    /**
-     * This method sets the transmission status (success/failure) of the indirect transmission.
-     *
-     * @param[in]  aTxStatus    The transmission status, `true` indicating success, `false` indicating failure.
-     *
-     */
-    void SetIndirectTxSuccess(bool aTxStatus) { mIndirectTxSuccess = aTxStatus; }
-
-    /**
-     * This method gets the IEEE 802.15.4 Key ID to use for indirect retransmissions.
-     *
-     * @returns The IEEE 802.15.4 Key ID value.
-     *
-     */
-    uint8_t GetIndirectKeyId(void) const { return mIndirectKeyId; }
-
-    /**
-     * This method sets the IEEE 802.15.4 Key ID value to use for indirect retransmissions.
-     *
-     * @param[in]  aKeyId  The IEEE 802.15.4 Key ID value.
-     *
-     */
-    void SetIndirectKeyId(uint8_t aKeyId) { mIndirectKeyId = aKeyId; }
-
-    /**
-     * This method gets the number of indirect transmission attempts for the current message.
-     *
-     * @returns The number of indirect transmission attempts.
-     *
-     */
-    uint8_t GetIndirectTxAttempts(void) const { return mIndirectTxAttempts; }
-
-    /**
-     * This method resets the number of indirect transmission attempts to zero.
-     *
-     */
-    void ResetIndirectTxAttempts(void) { mIndirectTxAttempts = 0; }
-
-    /**
-     * This method increments the number of indirect transmission attempts.
-     *
-     */
-    void IncrementIndirectTxAttempts(void) { mIndirectTxAttempts++; }
-
-    /**
-     * This method gets the IEEE 802.15.4 Data Sequence Number to use during indirect retransmissions.
-     *
-     * @returns The IEEE 802.15.4 Data Sequence Number value.
-     *
-     */
-    uint8_t GetIndirectDataSequenceNumber(void) const { return mIndirectDsn; }
-
-    /**
-     * This method sets the IEEE 802.15.4 Data Sequence Number to use during indirect retransmissions.
-     *
-     * @param[in]  aDsn  The IEEE 802.15.4 Data Sequence Number value.
-     *
-     */
-    void SetIndirectDataSequenceNumber(uint8_t aDsn) { mIndirectDsn = aDsn; }
-
-    /**
-     * This method indicates whether or not to source match on the short address.
-     *
-     * @returns TRUE if using the short address, FALSE if using the extended address.
-     *
-     */
-    bool IsIndirectSourceMatchShort(void) const { return mUseShortAddress; }
-
-    /**
-     * This method sets whether or not to source match on the short address.
-     *
-     * @param[in]  aShort  TRUE if using the short address, FALSE if using the extended address.
-     *
-     */
-    void SetIndirectSourceMatchShort(bool aShort) { mUseShortAddress = aShort; }
-
-    /**
-     * This method indicates whether or not the child needs to be added to the source match table.
-     *
-     * @returns TRUE if the child needs to be added to the source match table, FALSE otherwise.
-     *
-     */
-    bool IsIndirectSourceMatchPending(void) const { return mSourceMatchPending; }
-
-    /**
-     * This method sets whether or not the child needs to be added to the source match table.
-     *
-     * @param[in]  aPending  TRUE if the child needs to be added to the source match table, FALSE otherwise.
-     *
-     */
-    void SetIndirectSourceMatchPending(bool aPending) { mSourceMatchPending = aPending; }
-
-    /**
-     * This method returns the number of queued message(s) for the child
-     *
-     * @returns Number of queues message(s).
-     *
-     */
-    uint16_t GetIndirectMessageCount(void) const { return mQueuedMessageCount; }
-
-    /**
-     * This method increments the indirect message count.
-     *
-     */
-    void IncrementIndirectMessageCount(void) { mQueuedMessageCount++; }
-
-    /**
-     * This method decrements the indirect message count.
-     *
-     */
-    void DecrementIndirectMessageCount(void) { mQueuedMessageCount--; }
-
-    /**
-     * This method resets the indirect message count to zero.
-     *
-     */
-    void ResetIndirectMessageCount(void) { mQueuedMessageCount = 0; }
-
-    /**
      * This method clears the requested TLV list.
      *
      */
@@ -780,18 +990,7 @@ public:
      */
     void SetRequestTlv(uint8_t aIndex, uint8_t aType) { mRequestTlvs[aIndex] = aType; }
 
-    /**
-     * This method gets the mac address of child (either rloc16 or extended address depending on `UseShortAddress`
-     * flag).
-     *
-     * @param[out] aMacAddress A reference to a mac address object to which the child's address is copied.
-     *
-     * @returns A (const) reference to the mac address @a aMacAddress.
-     *
-     */
-    const Mac::Address &GetMacAddress(Mac::Address &aMacAddress) const;
-
-#if OPENTHREAD_ENABLE_CHILD_SUPERVISION
+#if OPENTHREAD_CONFIG_CHILD_SUPERVISION_ENABLE
 
     /**
      * This method increments the number of seconds since last supervision of the child.
@@ -813,44 +1012,113 @@ public:
      */
     void ResetSecondsSinceLastSupervision(void) { mSecondsSinceSupervision = 0; }
 
-#endif // #if OPENTHREAD_ENABLE_CHILD_SUPERVISION
+#endif // #if OPENTHREAD_CONFIG_CHILD_SUPERVISION_ENABLE
+
+#if OPENTHREAD_CONFIG_TMF_PROXY_MLR_ENABLE
+    /**
+     * This method returns MLR state of an Ip6 multicast address.
+     *
+     * @note The @p aAdddress reference MUST be from `IterateIp6Addresses()` or `AddressIterator`.
+     *
+     * @param[in] aAddress  The Ip6 multicast address.
+     *
+     * @returns MLR state of the Ip6 multicast address.
+     *
+     */
+    MlrState GetAddressMlrState(const Ip6::Address &aAddress) const;
+
+    /**
+     * This method sets MLR state of an Ip6 multicast address.
+     *
+     * @note The @p aAdddress reference MUST be from `IterateIp6Addresses()` or `AddressIterator`.
+     *
+     * @param[in] aAddress  The Ip6 multicast address.
+     * @param[in] aState    The target MLR state.
+     *
+     */
+    void SetAddressMlrState(const Ip6::Address &aAddress, MlrState aState);
+
+    /**
+     * This method returns if the Child has Ip6 address @p aAddress of MLR state `kMlrStateRegistered`.
+     *
+     * @param[in] aAddress  The Ip6 address.
+     *
+     * @retval true   If the Child has Ip6 address @p aAddress of MLR state `kMlrStateRegistered`.
+     * @retval false  If the Child does not have Ip6 address @p aAddress of MLR state `kMlrStateRegistered`.
+     *
+     */
+    bool HasMlrRegisteredAddress(const Ip6::Address &aAddress) const;
+
+    /**
+     * This method returns if the Child has any Ip6 address of MLR state `kMlrStateRegistered`.
+     *
+     * @retval true   If the Child has any Ip6 address of MLR state `kMlrStateRegistered`.
+     * @retval false  If the Child does not have any Ip6 address of MLR state `kMlrStateRegistered`.
+     *
+     */
+    bool HasAnyMlrRegisteredAddress(void) const { return mMlrRegisteredMask.HasAny(); }
+
+    /**
+     * This method returns if the Child has any Ip6 address of MLR state `kMlrStateToRegister`.
+     *
+     * @retval true   If the Child has any Ip6 address of MLR state `kMlrStateToRegister`.
+     * @retval false  If the Child does not have any Ip6 address of MLR state `kMlrStateToRegister`.
+     *
+     */
+    bool HasAnyMlrToRegisterAddress(void) const { return mMlrToRegisterMask.HasAny(); }
+#endif // OPENTHREAD_CONFIG_TMF_PROXY_MLR_ENABLE
 
 private:
-#if OPENTHREAD_CONFIG_IP_ADDRS_PER_CHILD < 2
-#error OPENTHREAD_CONFIG_IP_ADDRS_PER_CHILD should be at least set to 2.
+#if OPENTHREAD_CONFIG_MLE_IP_ADDRS_PER_CHILD < 2
+#error OPENTHREAD_CONFIG_MLE_IP_ADDRS_PER_CHILD should be at least set to 2.
 #endif
 
     enum
     {
-        kNumIp6Addresses = OPENTHREAD_CONFIG_IP_ADDRS_PER_CHILD - 1,
+        kNumIp6Addresses = OPENTHREAD_CONFIG_MLE_IP_ADDRS_PER_CHILD - 1,
     };
 
-    uint8_t      mMeshLocalIid[Ip6::Address::kInterfaceIdentifierSize]; ///< IPv6 address IID for mesh-local address
-    Ip6::Address mIp6Address[kNumIp6Addresses];                         ///< Registered IPv6 addresses
+    typedef BitVector<kNumIp6Addresses> ChildIp6AddressMask;
 
-    uint32_t mTimeout; ///< Child timeout
+    class AddressIteratorBuilder
+    {
+    public:
+        AddressIteratorBuilder(const Child &aChild, Ip6::Address::TypeFilter aFilter)
+            : mChild(aChild)
+            , mFilter(aFilter)
+        {
+        }
+
+        AddressIterator begin(void) { return AddressIterator(mChild, mFilter); }
+        AddressIterator end(void) { return AddressIterator(mChild, AddressIterator::kEndIterator); }
+
+    private:
+        const Child &            mChild;
+        Ip6::Address::TypeFilter mFilter;
+    };
+
+    Ip6::InterfaceIdentifier mMeshLocalIid;                 ///< IPv6 address IID for mesh-local address
+    Ip6::Address             mIp6Address[kNumIp6Addresses]; ///< Registered IPv6 addresses
+    uint32_t                 mTimeout;                      ///< Child timeout
+
+#if OPENTHREAD_CONFIG_TMF_PROXY_MLR_ENABLE
+    ChildIp6AddressMask mMlrToRegisterMask;
+    ChildIp6AddressMask mMlrRegisteredMask;
+#endif
+
+    uint8_t mNetworkDataVersion; ///< Current Network Data version
 
     union
     {
-        uint8_t mRequestTlvs[kMaxRequestTlvs];                 ///< Requested MLE TLVs
-        uint8_t mAttachChallenge[Mle::ChallengeTlv::kMaxSize]; ///< The challenge value
+        uint8_t mRequestTlvs[kMaxRequestTlvs];            ///< Requested MLE TLVs
+        uint8_t mAttachChallenge[Mle::kMaxChallengeSize]; ///< The challenge value
     };
 
-    uint32_t mIndirectFrameCounter;        ///< Frame counter for current indirect message (used fore retx).
-    Message *mIndirectMessage;             ///< Current indirect message.
-    uint16_t mIndirectFragmentOffset : 15; ///< 6LoWPAN fragment offset for the indirect message.
-    bool     mIndirectTxSuccess : 1;       ///< Indicates tx success/failure of current indirect message.
-    uint8_t  mIndirectKeyId;               ///< Key Id for current indirect message (used for retx).
-    uint8_t  mIndirectTxAttempts;          ///< Number of data poll triggered tx attempts.
-    uint8_t  mIndirectDsn;                 ///< MAC level Data Sequence Number (DSN) for retx attempts.
-    uint8_t  mNetworkDataVersion;          ///< Current Network Data version
-    uint16_t mQueuedMessageCount : 13;     ///< Number of queued indirect messages for the child.
-    bool     mUseShortAddress : 1;         ///< Indicates whether to use short or extended address.
-    bool     mSourceMatchPending : 1;      ///< Indicates whether or not pending to add to src match table.
-
-#if OPENTHREAD_ENABLE_CHILD_SUPERVISION
+#if OPENTHREAD_CONFIG_CHILD_SUPERVISION_ENABLE
     uint16_t mSecondsSinceSupervision; ///< Number of seconds since last supervision of the child.
-#endif                                 // OPENTHREAD_ENABLE_CHILD_SUPERVISION
+#endif
+
+    static_assert(OPENTHREAD_CONFIG_NUM_MESSAGE_BUFFERS < 8192, "mQueuedMessageCount cannot fit max required!");
 };
 
 /**
@@ -860,6 +1128,36 @@ private:
 class Router : public Neighbor
 {
 public:
+    /**
+     * This class represents diagnostic information for a Thread Router.
+     *
+     */
+    class Info : public otRouterInfo, public Clearable<Info>
+    {
+    public:
+        /**
+         * This method sets the `Info` instance from a given `Router`.
+         *
+         * @param[in] aRouter   A router.
+         *
+         */
+        void SetFrom(const Router &aRouter);
+    };
+
+    /**
+     * This method initializes the `Router` object.
+     *
+     * @param[in] aInstance  A reference to OpenThread instance.
+     *
+     */
+    void Init(Instance &aInstance) { Neighbor::Init(aInstance); }
+
+    /**
+     * This method clears the router entry.
+     *
+     */
+    void Clear(void);
+
     /**
      * This method gets the router ID of the next hop to this router.
      *
@@ -911,7 +1209,12 @@ public:
 private:
     uint8_t mNextHop;            ///< The next hop towards this router
     uint8_t mLinkQualityOut : 2; ///< The link quality out for this router
-    uint8_t mCost : 4;           ///< The cost to this router via neighbor router
+
+#if OPENTHREAD_CONFIG_MLE_LONG_ROUTES_ENABLE
+    uint8_t mCost; ///< The cost to this router via neighbor router
+#else
+    uint8_t mCost : 4;     ///< The cost to this router via neighbor router
+#endif
 };
 
 } // namespace ot

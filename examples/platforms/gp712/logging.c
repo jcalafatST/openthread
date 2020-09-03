@@ -36,12 +36,10 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-
-#ifndef _WIN32
 #include <syslog.h>
-#endif
 
 #include <openthread/platform/logging.h>
+#include <openthread/platform/toolchain.h>
 
 #include "utils/code_utils.h"
 
@@ -53,8 +51,7 @@
     offset += (unsigned int)charsWritten;                                                 \
     otEXPECT_ACTION(offset < sizeof(logString), logString[sizeof(logString) - 1] = 0)
 
-#if (OPENTHREAD_CONFIG_LOG_OUTPUT == OPENTHREAD_CONFIG_LOG_OUTPUT_PLATFORM_DEFINED) || \
-    (OPENTHREAD_CONFIG_LOG_OUTPUT == OPENTHREAD_CONFIG_LOG_OUTPUT_NCP_SPINEL)
+#if (OPENTHREAD_CONFIG_LOG_OUTPUT == OPENTHREAD_CONFIG_LOG_OUTPUT_PLATFORM_DEFINED)
 
 int PlatOtLogLevelToSysLogLevel(otLogLevel aLogLevel)
 {
@@ -91,6 +88,8 @@ int PlatOtLogLevelToSysLogLevel(otLogLevel aLogLevel)
 
 OT_TOOL_WEAK void otPlatLog(otLogLevel aLogLevel, otLogRegion aLogRegion, const char *aFormat, ...)
 {
+    OT_UNUSED_VARIABLE(aLogRegion);
+
     char         logString[512];
     unsigned int offset;
     int          charsWritten;
@@ -106,8 +105,6 @@ OT_TOOL_WEAK void otPlatLog(otLogLevel aLogLevel, otLogRegion aLogRegion, const 
 
 exit:
     syslog(PlatOtLogLevelToSysLogLevel(aLogLevel), "%s", logString);
-
-    (void)aLogRegion;
 }
 
 #endif

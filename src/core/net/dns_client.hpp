@@ -32,7 +32,6 @@
 #include "openthread-core-config.h"
 
 #include <openthread/dns.h>
-#include <openthread/types.h>
 
 #include "common/message.hpp"
 #include "common/timer.hpp"
@@ -49,104 +48,6 @@ namespace ot {
 namespace Dns {
 
 /**
- * This class implements metadata required for DNS retransmission.
- *
- */
-OT_TOOL_PACKED_BEGIN
-class QueryMetadata
-{
-    friend class Client;
-
-public:
-    /**
-     * Default constructor for the object.
-     *
-     */
-    QueryMetadata(void) { memset(this, 0, sizeof(*this)); };
-
-    /**
-     * This constructor initializes the object with specific values.
-     *
-     * @param[in]  aHandler  Pointer to a handler function for the response.
-     * @param[in]  aContext  Context for the handler function.
-     *
-     */
-    QueryMetadata(otDnsResponseHandler aHandler, void *aContext)
-    {
-        memset(this, 0, sizeof(*this));
-        mResponseHandler = aHandler;
-        mResponseContext = aContext;
-    };
-
-    /**
-     * This method appends request data to the message.
-     *
-     * @param[in]  aMessage  A reference to the message.
-     *
-     * @retval OT_ERROR_NONE     Successfully appended the bytes.
-     * @retval OT_ERROR_NO_BUFS  Insufficient available buffers to grow the message.
-     *
-     */
-    otError AppendTo(Message &aMessage) const { return aMessage.Append(this, sizeof(*this)); };
-
-    /**
-     * This method reads request data from the message.
-     *
-     * @param[in]  aMessage  A reference to the message.
-     *
-     * @returns The number of bytes read.
-     *
-     */
-    uint16_t ReadFrom(const Message &aMessage)
-    {
-        return aMessage.Read(aMessage.GetLength() - sizeof(*this), sizeof(*this), this);
-    };
-
-    /**
-     * This method updates request data in the message.
-     *
-     * @param[in]  aMessage  A reference to the message.
-     *
-     * @returns The number of bytes updated.
-     *
-     */
-    int UpdateIn(Message &aMessage) const
-    {
-        return aMessage.Write(aMessage.GetLength() - sizeof(*this), sizeof(*this), this);
-    }
-
-    /**
-     * This method checks if the message shall be sent before the given time.
-     *
-     * @param[in]  aTime  A time to compare.
-     *
-     * @retval TRUE   If the message shall be sent before the given time.
-     * @retval FALSE  Otherwise.
-     */
-    bool IsEarlier(uint32_t aTime) const { return (static_cast<int32_t>(aTime - mTransmissionTime) > 0); };
-
-    /**
-     * This method checks if the message shall be sent after the given time.
-     *
-     * @param[in]  aTime  A time to compare.
-     *
-     * @retval TRUE   If the message shall be sent after the given time.
-     * @retval FALSE  Otherwise.
-     */
-    bool IsLater(uint32_t aTime) const { return (static_cast<int32_t>(aTime - mTransmissionTime) < 0); };
-
-private:
-    const char *         mHostname;            ///< A hostname to be find.
-    otDnsResponseHandler mResponseHandler;     ///< A function pointer that is called on response reception.
-    void *               mResponseContext;     ///< A pointer to arbitrary context information.
-    uint32_t             mTransmissionTime;    ///< Time when the timer should shoot for this message.
-    Ip6::Address         mSourceAddress;       ///< IPv6 address of the message source.
-    Ip6::Address         mDestinationAddress;  ///< IPv6 address of the message destination.
-    uint16_t             mDestinationPort;     ///< UDP port of the message destination.
-    uint8_t              mRetransmissionCount; ///< Number of retransmissions.
-} OT_TOOL_PACKED_END;
-
-/**
  * This class implements DNS client.
  *
  */
@@ -156,13 +57,10 @@ public:
     /**
      * This constructor initializes the object.
      *
-     * @param[in]  aNetif    A reference to the network interface that DNS client should be assigned to.
+     * @param[in]  aInstance     A reference to the OpenThread instance.
      *
      */
-    Client(Ip6::Netif &aNetif)
-        : mSocket(aNetif.GetIp6().GetUdp())
-        , mMessageId(0)
-        , mRetransmissionTimer(aNetif.GetInstance(), &Client::HandleRetransmissionTimer, this){};
+    explicit Client(Instance &aInstance);
 
     /**
      * This method starts the DNS client.
@@ -194,14 +92,6 @@ public:
      */
     otError Query(const otDnsQuery *aQuery, otDnsResponseHandler aHandler, void *aContext);
 
-    /**
-     * This method returns a port number used by DNS client.
-     *
-     * @returns A port number.
-     *
-     */
-    uint16_t GetPort(void) { return mSocket.GetSockName().mPort; };
-
 private:
     /**
      * Retransmission parameters.
@@ -231,11 +121,27 @@ private:
         kBufSize = 16
     };
 
+    struct QueryMetadata
+    {
+        otError AppendTo(Message &aMessage) const { return aMessage.Append(this, sizeof(*this)); }
+        void    ReadFrom(const Message &aMessage);
+        void    UpdateIn(Message &aMessage) const;
+
+        const char *         mHostname;
+        otDnsResponseHandler mResponseHandler;
+        void *               mResponseContext;
+        TimeMilli            mTransmissionTime;
+        Ip6::Address         mSourceAddress;
+        Ip6::Address         mDestinationAddress;
+        uint16_t             mDestinationPort;
+        uint8_t              mRetransmissionCount;
+    };
+
     Message *NewMessage(const Header &aHeader);
     Message *CopyAndEnqueueMessage(const Message &aMessage, const QueryMetadata &aQueryMetadata);
     void     DequeueMessage(Message &aMessage);
     otError  SendMessage(Message &aMessage, const Ip6::MessageInfo &aMessageInfo);
-    otError  SendCopy(const Message &aMessage, const Ip6::MessageInfo &aMessageInfo);
+    void     SendCopy(const Message &aMessage, const Ip6::MessageInfo &aMessageInfo);
 
     otError AppendCompressedHostname(Message &aMessage, const char *aHostname);
     otError CompareQuestions(Message &aMessageResponse, Message &aMessageQuery, uint16_t &aOffset);
@@ -244,7 +150,7 @@ private:
     Message *FindRelatedQuery(const Header &aResponseHeader, QueryMetadata &aQueryMetadata);
     void     FinalizeDnsTransaction(Message &            aQuery,
                                     const QueryMetadata &aQueryMetadata,
-                                    otIp6Address *       aAddress,
+                                    const otIp6Address * aAddress,
                                     uint32_t             aTtl,
                                     otError              aResult);
 
@@ -254,7 +160,7 @@ private:
     static void HandleUdpReceive(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo);
     void        HandleUdpReceive(Message &aMessage, const Ip6::MessageInfo &aMessageInfo);
 
-    Ip6::UdpSocket mSocket;
+    Ip6::Udp::Socket mSocket;
 
     uint16_t     mMessageId;
     MessageQueue mPendingQueries;

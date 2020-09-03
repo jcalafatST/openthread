@@ -31,23 +31,65 @@
  *   This file includes definitions for maintaining Thread network topologies.
  */
 
-#define WPP_NAME "topology.tmh"
-
 #include "topology.hpp"
 
 #include "common/code_utils.hpp"
 #include "common/debug.hpp"
 #include "common/instance.hpp"
+#include "common/locator-getters.hpp"
 #include "common/logging.hpp"
 
 namespace ot {
 
-void Neighbor::GenerateChallenge(void)
+bool Neighbor::AddressMatcher::Matches(const Neighbor &aNeighbor) const
 {
-    Random::FillBuffer(mValidPending.mPending.mChallenge, sizeof(mValidPending.mPending.mChallenge));
+    bool matches = false;
+
+    VerifyOrExit(aNeighbor.MatchesFilter(mStateFilter), OT_NOOP);
+
+    if (mShortAddress != Mac::kShortAddrInvalid)
+    {
+        VerifyOrExit(mShortAddress == aNeighbor.GetRloc16(), OT_NOOP);
+    }
+
+    if (mExtAddress != nullptr)
+    {
+        VerifyOrExit(*mExtAddress == aNeighbor.GetExtAddress(), OT_NOOP);
+    }
+
+    matches = true;
+
+exit:
+    return matches;
 }
 
-bool Child::IsStateValidOrAttaching(void) const
+void Neighbor::Info::SetFrom(const Neighbor &aNeighbor)
+{
+    Clear();
+    mExtAddress        = aNeighbor.GetExtAddress();
+    mAge               = Time::MsecToSec(TimerMilli::GetNow() - aNeighbor.GetLastHeard());
+    mRloc16            = aNeighbor.GetRloc16();
+    mLinkFrameCounter  = aNeighbor.GetLinkFrameCounter();
+    mMleFrameCounter   = aNeighbor.GetMleFrameCounter();
+    mLinkQualityIn     = aNeighbor.GetLinkInfo().GetLinkQuality();
+    mAverageRssi       = aNeighbor.GetLinkInfo().GetAverageRss();
+    mLastRssi          = aNeighbor.GetLinkInfo().GetLastRss();
+    mFrameErrorRate    = aNeighbor.GetLinkInfo().GetFrameErrorRate();
+    mMessageErrorRate  = aNeighbor.GetLinkInfo().GetMessageErrorRate();
+    mRxOnWhenIdle      = aNeighbor.IsRxOnWhenIdle();
+    mSecureDataRequest = aNeighbor.IsSecureDataRequest();
+    mFullThreadDevice  = aNeighbor.IsFullThreadDevice();
+    mFullNetworkData   = aNeighbor.IsFullNetworkData();
+}
+
+void Neighbor::Init(Instance &aInstance)
+{
+    InstanceLocatorInit::Init(aInstance);
+    mLinkInfo.Init(aInstance);
+    SetState(kStateInvalid);
+}
+
+bool Neighbor::IsStateValidOrAttaching(void) const
 {
     bool rval = false;
 
@@ -70,96 +112,161 @@ bool Child::IsStateValidOrAttaching(void) const
     return rval;
 }
 
-void Child::ClearIp6Addresses(void)
+bool Neighbor::MatchesFilter(StateFilter aFilter) const
 {
-    memset(mMeshLocalIid, 0, sizeof(mMeshLocalIid));
-    memset(mIp6Address, 0, sizeof(mIp6Address));
+    bool matches = false;
+
+    switch (aFilter)
+    {
+    case kInStateValid:
+        matches = IsStateValid();
+        break;
+
+    case kInStateValidOrRestoring:
+        matches = IsStateValidOrRestoring();
+        break;
+
+    case kInStateChildIdRequest:
+        matches = IsStateChildIdRequest();
+        break;
+
+    case kInStateValidOrAttaching:
+        matches = IsStateValidOrAttaching();
+        break;
+
+    case kInStateInvalid:
+        matches = IsStateInvalid();
+        break;
+
+    case kInStateAnyExceptInvalid:
+        matches = !IsStateInvalid();
+        break;
+
+    case kInStateAnyExceptValidOrRestoring:
+        matches = !IsStateValidOrRestoring();
+        break;
+
+    case kInStateAny:
+        matches = true;
+        break;
+    }
+
+    return matches;
 }
 
-/**
- * Determines if all elements in an array are zero.
- *
- * @param[in]  aArray   A pointer to an array of bytes.
- * @param[in]  aLength  Array length (number of bytes).
- *
- * @returns TRUE if all bytes in the array are zero, FALSE otherwise.
- *
- */
-static bool IsAllZero(const uint8_t *aArray, uint8_t aLength)
+void Neighbor::GenerateChallenge(void)
 {
-    bool retval = true;
+    IgnoreError(
+        Random::Crypto::FillBuffer(mValidPending.mPending.mChallenge, sizeof(mValidPending.mPending.mChallenge)));
+}
 
-    for (; aLength != 0; aArray++, aLength--)
+void Child::Info::SetFrom(const Child &aChild)
+{
+    Clear();
+    mExtAddress         = aChild.GetExtAddress();
+    mTimeout            = aChild.GetTimeout();
+    mRloc16             = aChild.GetRloc16();
+    mChildId            = Mle::Mle::ChildIdFromRloc16(aChild.GetRloc16());
+    mNetworkDataVersion = aChild.GetNetworkDataVersion();
+    mAge                = Time::MsecToSec(TimerMilli::GetNow() - aChild.GetLastHeard());
+    mLinkQualityIn      = aChild.GetLinkInfo().GetLinkQuality();
+    mAverageRssi        = aChild.GetLinkInfo().GetAverageRss();
+    mLastRssi           = aChild.GetLinkInfo().GetLastRss();
+    mFrameErrorRate     = aChild.GetLinkInfo().GetFrameErrorRate();
+    mMessageErrorRate   = aChild.GetLinkInfo().GetMessageErrorRate();
+    mRxOnWhenIdle       = aChild.IsRxOnWhenIdle();
+    mSecureDataRequest  = aChild.IsSecureDataRequest();
+    mFullThreadDevice   = aChild.IsFullThreadDevice();
+    mFullNetworkData    = aChild.IsFullNetworkData();
+    mIsStateRestoring   = aChild.IsStateRestoring();
+}
+
+const Ip6::Address *Child::AddressIterator::GetAddress(void) const
+{
+    // `mIndex` value of zero indicates mesh-local IPv6 address.
+    // Non-zero value specifies the index into address array starting
+    // from one for first element (i.e, `mIndex - 1` gives the array
+    // index).
+
+    return (mIndex == 0) ? &mMeshLocalAddress : ((mIndex < kMaxIndex) ? &mChild.mIp6Address[mIndex - 1] : nullptr);
+}
+
+void Child::AddressIterator::Update(void)
+{
+    const Ip6::Address *address;
+
+    while (true)
     {
-        VerifyOrExit(*aArray == 0, retval = false);
+        if ((mIndex == 0) && (mChild.GetMeshLocalIp6Address(mMeshLocalAddress) != OT_ERROR_NONE))
+        {
+            mIndex++;
+        }
+
+        address = GetAddress();
+
+        VerifyOrExit((address != nullptr) && !address->IsUnspecified(), mIndex = kMaxIndex);
+
+        VerifyOrExit(!address->MatchesFilter(mFilter), OT_NOOP);
+        mIndex++;
     }
 
 exit:
-    return retval;
+    return;
 }
 
-otError Child::GetMeshLocalIp6Address(Instance &aInstance, Ip6::Address &aAddress) const
+void Child::Clear(void)
+{
+    Instance &instance = GetInstance();
+
+    memset(reinterpret_cast<void *>(this), 0, sizeof(Child));
+    Init(instance);
+}
+
+void Child::ClearIp6Addresses(void)
+{
+    mMeshLocalIid.Clear();
+    memset(mIp6Address, 0, sizeof(mIp6Address));
+#if OPENTHREAD_CONFIG_TMF_PROXY_MLR_ENABLE
+    mMlrToRegisterMask.Clear();
+    mMlrRegisteredMask.Clear();
+#endif
+}
+
+otError Child::GetMeshLocalIp6Address(Ip6::Address &aAddress) const
 {
     otError error = OT_ERROR_NONE;
 
-    VerifyOrExit(!IsAllZero(mMeshLocalIid, sizeof(mMeshLocalIid)), error = OT_ERROR_NOT_FOUND);
+    VerifyOrExit(!mMeshLocalIid.IsUnspecified(), error = OT_ERROR_NOT_FOUND);
 
-    memcpy(aAddress.mFields.m8, aInstance.GetThreadNetif().GetMle().GetMeshLocalPrefix(),
-           Ip6::Address::kMeshLocalPrefixSize);
-
+    aAddress.SetPrefix(Get<Mle::MleRouter>().GetMeshLocalPrefix());
     aAddress.SetIid(mMeshLocalIid);
 
 exit:
     return error;
 }
 
-otError Child::GetNextIp6Address(Instance &aInstance, Ip6AddressIterator &aIterator, Ip6::Address &aAddress) const
-{
-    otError                   error = OT_ERROR_NONE;
-    otChildIp6AddressIterator index;
-
-    // Index zero corresponds to the Mesh Local IPv6 address (if any).
-
-    if (aIterator.Get() == 0)
-    {
-        aIterator.Increment();
-        VerifyOrExit(GetMeshLocalIp6Address(aInstance, aAddress) == OT_ERROR_NOT_FOUND);
-    }
-
-    index = aIterator.Get() - 1;
-
-    VerifyOrExit(index < kNumIp6Addresses, error = OT_ERROR_NOT_FOUND);
-
-    VerifyOrExit(!mIp6Address[index].IsUnspecified(), error = OT_ERROR_NOT_FOUND);
-    aAddress = mIp6Address[index];
-    aIterator.Increment();
-
-exit:
-    return error;
-}
-
-otError Child::AddIp6Address(Instance &aInstance, const Ip6::Address &aAddress)
+otError Child::AddIp6Address(const Ip6::Address &aAddress)
 {
     otError error = OT_ERROR_NONE;
 
     VerifyOrExit(!aAddress.IsUnspecified(), error = OT_ERROR_INVALID_ARGS);
 
-    if (aInstance.GetThreadNetif().GetMle().IsMeshLocalAddress(aAddress))
+    if (Get<Mle::MleRouter>().IsMeshLocalAddress(aAddress))
     {
-        VerifyOrExit(IsAllZero(mMeshLocalIid, sizeof(mMeshLocalIid)), error = OT_ERROR_ALREADY);
-        memcpy(mMeshLocalIid, aAddress.GetIid(), Ip6::Address::kInterfaceIdentifierSize);
+        VerifyOrExit(mMeshLocalIid.IsUnspecified(), error = OT_ERROR_ALREADY);
+        mMeshLocalIid = aAddress.GetIid();
         ExitNow();
     }
 
-    for (uint16_t index = 0; index < kNumIp6Addresses; index++)
+    for (Ip6::Address &ip6Address : mIp6Address)
     {
-        if (mIp6Address[index].IsUnspecified())
+        if (ip6Address.IsUnspecified())
         {
-            mIp6Address[index] = aAddress;
+            ip6Address = aAddress;
             ExitNow();
         }
 
-        VerifyOrExit(mIp6Address[index] != aAddress, error = OT_ERROR_ALREADY);
+        VerifyOrExit(ip6Address != aAddress, error = OT_ERROR_ALREADY);
     }
 
     error = OT_ERROR_NO_BUFS;
@@ -168,18 +275,18 @@ exit:
     return error;
 }
 
-otError Child::RemoveIp6Address(Instance &aInstance, const Ip6::Address &aAddress)
+otError Child::RemoveIp6Address(const Ip6::Address &aAddress)
 {
     otError  error = OT_ERROR_NOT_FOUND;
     uint16_t index;
 
     VerifyOrExit(!aAddress.IsUnspecified(), error = OT_ERROR_INVALID_ARGS);
 
-    if (aInstance.GetThreadNetif().GetMle().IsMeshLocalAddress(aAddress))
+    if (Get<Mle::MleRouter>().IsMeshLocalAddress(aAddress))
     {
-        if (memcmp(aAddress.GetIid(), mMeshLocalIid, Ip6::Address::kInterfaceIdentifierSize) == 0)
+        if (aAddress.GetIid() == mMeshLocalIid)
         {
-            memset(mMeshLocalIid, 0, sizeof(mMeshLocalIid));
+            mMeshLocalIid.Clear();
             error = OT_ERROR_NONE;
         }
 
@@ -188,7 +295,7 @@ otError Child::RemoveIp6Address(Instance &aInstance, const Ip6::Address &aAddres
 
     for (index = 0; index < kNumIp6Addresses; index++)
     {
-        VerifyOrExit(!mIp6Address[index].IsUnspecified());
+        VerifyOrExit(!mIp6Address[index].IsUnspecified(), OT_NOOP);
 
         if (mIp6Address[index] == aAddress)
         {
@@ -210,23 +317,23 @@ exit:
     return error;
 }
 
-bool Child::HasIp6Address(Instance &aInstance, const Ip6::Address &aAddress) const
+bool Child::HasIp6Address(const Ip6::Address &aAddress) const
 {
     bool retval = false;
 
-    VerifyOrExit(!aAddress.IsUnspecified());
+    VerifyOrExit(!aAddress.IsUnspecified(), OT_NOOP);
 
-    if (aInstance.GetThreadNetif().GetMle().IsMeshLocalAddress(aAddress))
+    if (Get<Mle::MleRouter>().IsMeshLocalAddress(aAddress))
     {
-        retval = (memcmp(aAddress.GetIid(), mMeshLocalIid, Ip6::Address::kInterfaceIdentifierSize) == 0);
+        retval = (aAddress.GetIid() == mMeshLocalIid);
         ExitNow();
     }
 
-    for (uint16_t index = 0; index < kNumIp6Addresses; index++)
+    for (const Ip6::Address &ip6Address : mIp6Address)
     {
-        VerifyOrExit(!mIp6Address[index].IsUnspecified());
+        VerifyOrExit(!ip6Address.IsUnspecified(), OT_NOOP);
 
-        if (mIp6Address[index] == aAddress)
+        if (ip6Address == aAddress)
         {
             ExitNow(retval = true);
         }
@@ -236,23 +343,97 @@ exit:
     return retval;
 }
 
+#if OPENTHREAD_CONFIG_TMF_PROXY_DUA_ENABLE
+const Ip6::Address *Child::GetDomainUnicastAddress(void) const
+{
+    const Ip6::Address *addr = nullptr;
+
+    for (const Ip6::Address &ip6Address : mIp6Address)
+    {
+        VerifyOrExit(!ip6Address.IsUnspecified(), OT_NOOP);
+
+        if (Get<BackboneRouter::Leader>().IsDomainUnicast(ip6Address))
+        {
+            ExitNow(addr = &ip6Address);
+        }
+    }
+
+exit:
+    return addr;
+}
+#endif
+
 void Child::GenerateChallenge(void)
 {
-    Random::FillBuffer(mAttachChallenge, sizeof(mAttachChallenge));
+    IgnoreError(Random::Crypto::FillBuffer(mAttachChallenge, sizeof(mAttachChallenge)));
 }
 
-const Mac::Address &Child::GetMacAddress(Mac::Address &aMacAddress) const
+#if OPENTHREAD_CONFIG_TMF_PROXY_MLR_ENABLE
+bool Child::HasMlrRegisteredAddress(const Ip6::Address &aAddress) const
 {
-    if (mUseShortAddress)
+    bool has = false;
+
+    VerifyOrExit(mMlrRegisteredMask.HasAny(), OT_NOOP);
+
+    for (const Ip6::Address &address : IterateIp6Addresses(Ip6::Address::kTypeMulticastLargerThanRealmLocal))
     {
-        aMacAddress.SetShort(GetRloc16());
-    }
-    else
-    {
-        aMacAddress.SetExtended(GetExtAddress());
+        if (GetAddressMlrState(address) == kMlrStateRegistered && address == aAddress)
+        {
+            ExitNow(has = true);
+        }
     }
 
-    return aMacAddress;
+exit:
+    return has;
+}
+
+MlrState Child::GetAddressMlrState(const Ip6::Address &aAddress) const
+{
+    uint16_t addressIndex;
+
+    OT_ASSERT(&mIp6Address[0] <= &aAddress && &aAddress < OT_ARRAY_END(mIp6Address));
+
+    addressIndex = static_cast<uint16_t>(&aAddress - mIp6Address);
+
+    return mMlrToRegisterMask.Get(addressIndex)
+               ? kMlrStateToRegister
+               : (mMlrRegisteredMask.Get(addressIndex) ? kMlrStateRegistered : kMlrStateRegistering);
+}
+
+void Child::SetAddressMlrState(const Ip6::Address &aAddress, MlrState aState)
+{
+    uint16_t addressIndex;
+
+    OT_ASSERT(&mIp6Address[0] <= &aAddress && &aAddress < OT_ARRAY_END(mIp6Address));
+
+    addressIndex = static_cast<uint16_t>(&aAddress - mIp6Address);
+
+    mMlrToRegisterMask.Set(addressIndex, aState == kMlrStateToRegister);
+    mMlrRegisteredMask.Set(addressIndex, aState == kMlrStateRegistered);
+}
+#endif // OPENTHREAD_CONFIG_TMF_PROXY_MLR_ENABLE
+
+void Router::Info::SetFrom(const Router &aRouter)
+{
+    Clear();
+    mRloc16          = aRouter.GetRloc16();
+    mRouterId        = Mle::Mle::RouterIdFromRloc16(mRloc16);
+    mExtAddress      = aRouter.GetExtAddress();
+    mAllocated       = true;
+    mNextHop         = aRouter.GetNextHop();
+    mLinkEstablished = aRouter.IsStateValid();
+    mPathCost        = aRouter.GetCost();
+    mLinkQualityIn   = aRouter.GetLinkInfo().GetLinkQuality();
+    mLinkQualityOut  = aRouter.GetLinkQualityOut();
+    mAge             = static_cast<uint8_t>(Time::MsecToSec(TimerMilli::GetNow() - aRouter.GetLastHeard()));
+}
+
+void Router::Clear(void)
+{
+    Instance &instance = GetInstance();
+
+    memset(reinterpret_cast<void *>(this), 0, sizeof(Router));
+    Init(instance);
 }
 
 } // namespace ot
